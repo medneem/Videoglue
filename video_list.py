@@ -98,16 +98,18 @@ class VideoListMixin:
         style = ttk.Style(self)
         style.configure("Video.Treeview", rowheight=30, font=("TkDefaultFont", 10))
         style.configure("Video.Treeview.Heading", font=("TkDefaultFont", 10, "bold"))
-        self.tree = ttk.Treeview(self.drop_surface, columns=("include", "number", "name", "duration", "remove"),
+        self.tree = ttk.Treeview(self.drop_surface, columns=("include", "number", "name", "size", "duration", "remove"),
                                  show="headings", style="Video.Treeview", selectmode="browse")
         self.tree.heading("include", text="", command=self.toggle_all_rows)
         self.tree.heading("number", text="Номер файла")
         self.tree.heading("name", text="Файл")
+        self.tree.heading("size", text="Размер, МиБ")
         self.tree.heading("duration", text="Длительность")
         self.tree.heading("remove", text="", command=self.clear_files)
         self.tree.column("include", width=48, minwidth=48, anchor="center", stretch=False)
         self.tree.column("number", width=105, anchor="center", stretch=False)
         self.tree.column("name", width=300)
+        self.tree.column("size", width=110, anchor="e", stretch=False)
         self.tree.column("duration", width=140, anchor="center", stretch=False)
         self.tree.column("remove", width=42, minwidth=42, anchor="center", stretch=False)
         self.tree.grid(row=0, column=0, sticky="nsew")
@@ -341,7 +343,7 @@ class VideoListMixin:
             # Treeview не умеет менять высоту отдельной строки: временная строка
             # раздвигает соседние файлы именно в точке будущей вставки.
             gap_index = target_index + (source_index < target_index)
-            self.drag_gap = self.tree.insert("", gap_index, values=("", "", "→  Вставить здесь", "", ""),
+            self.drag_gap = self.tree.insert("", gap_index, values=("", "", "→  Вставить здесь", "", "", ""),
                                               tags=("drop_gap",))
             self.schedule_icon_refresh()
         self.tree.configure(cursor="fleur")
@@ -430,7 +432,7 @@ class VideoListMixin:
                 if row and row != self.drag_gap:
                     self.toggle_row(row)
             return "break"
-        if not self.busy and self.tree.identify_column(event.x) == "#5":
+        if not self.busy and self.tree.identify_column(event.x) == "#6":
             row = self.tree.identify_row(event.y)
             if row:
                 self.dragged_row = None
@@ -455,7 +457,7 @@ class VideoListMixin:
         if self.remove_pressed_row:
             row = self.remove_pressed_row
             self.remove_pressed_row = None
-            if self.tree.identify_column(event.x) == "#5" and self.tree.identify_row(event.y) == row:
+            if self.tree.identify_column(event.x) == "#6" and self.tree.identify_row(event.y) == row:
                 self.removing_rows.add(row)
                 self.removal_jobs[row] = [self.after(90, self.fade_remove_effect, row),
                                           self.after(210, self.finish_remove_effect, row)]
@@ -669,7 +671,12 @@ class VideoListMixin:
         if info is not None:
             self.video_metadata[path] = info
         self.empty_hint.place_forget()
-        row = self.tree.insert("", "end", values=("", len(self.items), path.name,
+        # Размер исходника показываем и при ошибке чтения видеометаданных.
+        try:
+            size_text = f"{path.stat().st_size / 1024 ** 2:.1f}"
+        except OSError:
+            size_text = "—"
+        row = self.tree.insert("", "end", values=("", len(self.items), path.name, size_text,
                                 format_duration(duration) if duration is not None else "Ошибка чтения", ""),
                                 tags=(("stripe", "arrive") if len(self.items) % 2 == 0 else ("arrive",)))
         self.included_rows.add(row)

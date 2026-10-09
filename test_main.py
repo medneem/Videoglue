@@ -92,7 +92,7 @@ class VideoListTests(unittest.TestCase):
                 self.assertNotIn(row, app.included_rows)
                 self.assertEqual(len(app.videos), 999)
                 app.remove_pressed_row = row
-                with patch.object(app.tree, "identify_column", return_value="#5"), \
+                with patch.object(app.tree, "identify_column", return_value="#6"), \
                         patch.object(app.tree, "identify_row", return_value=row):
                     app.finish_row_drag(SimpleNamespace(x=10, y=30))
                 pending = list(app.removal_jobs[row])
@@ -340,7 +340,7 @@ class VideoListTests(unittest.TestCase):
                 self.assertEqual(app.drop_files(SimpleNamespace(
                     data=app.tk.call("list", str(first)))), "none")
                 self.assertEqual(app.tree.set(rows[2], "remove"), "")
-                with patch.object(app.tree, "identify_column", return_value="#5") as column, \
+                with patch.object(app.tree, "identify_column", return_value="#6") as column, \
                         patch.object(app.tree, "identify_row", return_value=rows[2]):
                     app.start_row_drag(SimpleNamespace(x=700, y=30))
                     column.return_value = "#3"

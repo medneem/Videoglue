@@ -230,7 +230,6 @@ class VideoGlue(VideoListMixin, TkinterDnD.Tk):
         if any(info is None for info in infos):
             self.estimated_size_var.set("Примерный размер: недостаточно метаданных")
             return
-        preliminary = field_orders is None
         if field_orders is None and self.deinterlace_var.get() != "Выключено":
             field_orders = ["auto" if self.deinterlace_var.get() == "Принудительно" or info.interlaced
                             else None for info in infos]
@@ -242,8 +241,7 @@ class VideoGlue(VideoListMixin, TkinterDnD.Tk):
             self.estimated_size_var.set("Примерный размер: недостаточно метаданных")
             return
         unit, divider = ("ГиБ", 1024 ** 3) if size >= 1024 ** 3 else ("МиБ", 1024 ** 2)
-        suffix = " (предварительно до анализа)" if preliminary and self.compress_var.get() and self.deinterlace_var.get() == "Авто" else ""
-        self.estimated_size_var.set(f"Примерный размер: ≈ {size / divider:.1f} {unit}{suffix}")
+        self.estimated_size_var.set(f"Примерный размер: ≈ {size / divider:.1f} {unit}")
 
     def show_stage_progress(self, data: object) -> None:
         """Отобразить позицию текущего ролика и всего этапа."""
