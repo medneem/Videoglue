@@ -91,10 +91,12 @@ def auto_frame_rate(source_rate: str | None) -> str | None:
 
 def rate_control_frame_rate(metadata: list[MediaInfo], field_orders: list[str | None],
                             auto_rates: list[str | None] | None) -> str | None:
-    """Подсказать NVENC среднее число кадров в секунду, не меняя их PTS.
+    """Подсказать кодировщику среднее число кадров в секунду, не меняя PTS.
 
     concat может терять объявленный FPS. Без подсказки NVENC рассчитывает
     биты на кадр для 30 FPS и почти удваивает размер реального 60 FPS.
+    x264 без подсказки принимает микросекундную шкалу concat за миллион
+    FPS, ошибается в уровне H.264 и резко ухудшает первые кадры при VBR.
     """
     frames = 0.0
     duration = 0.0
@@ -563,10 +565,16 @@ class MergeWorker:
                                 codec_args += ["-rc_framerate", rate_hint]
                                 journal.write(f"NVENC rate-control frame rate: {rate_hint}")
                         elif encoder == "cpu":
+                            rate_hint = rate_control_frame_rate(metadata, field_orders, auto_rates)
                             codec_args = ["-c:v", "libx264", "-b:v", str(target_bitrate),
                                            "-maxrate", str(peak_bitrate), "-bufsize", str(peak_bitrate * 2),
                                            "-preset", "slow",
-                                          "-pix_fmt", "yuv420p", *audio_args]
+                                           "-pix_fmt", "yuv420p", *audio_args]
+                            if rate_hint:
+                                # Меняем только расчёты x264, сохраняя VFR и
+                                # микросекундные PTS без фильтра fps или -r.
+                                codec_args += ["-x264-params", f"fps={rate_hint}"]
+                                journal.write(f"x264 rate-control frame rate: {rate_hint}")
                         else:
                             codec_args = ["-c", "copy"]
                         if encoder != "copy":

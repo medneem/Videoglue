@@ -918,6 +918,36 @@ class MergeTests(unittest.TestCase):
             self.ffmpeg, paths, "Малое", [dv, hd], field_orders=["bff", None])[0]
         self.assertEqual(mixed, int((dv_target * 100 + hd_target * 200) / 300))
 
+    def test_cpu_preserves_first_frame_detail_after_concat(self) -> None:
+        """Микросекундная шкала concat не должна разрушать первый кадр VBR."""
+        with tempfile.TemporaryDirectory() as directory:
+            folder = Path(directory)
+            source, output = folder / "source.mp4", folder / "result.mp4"
+            subprocess.run(
+                [self.ffmpeg, "-hide_banner", "-loglevel", "error", "-f", "lavfi", "-i",
+                 "testsrc2=s=640x360:r=30", "-t", "2", "-c:v", "libx264", "-crf", "18",
+                 "-y", str(source)], check=True, capture_output=True,
+                creationflags=media_ffmpeg.NO_WINDOW)
+            self.worker.run_merge(self.ffmpeg, [source], output, compress=True,
+                                  quality="Максимальное", use_gpu=False, deinterlace="Выключено")
+            self.assertEqual(self.drain_events()[-1], ("merge_done", output))
+
+            def first_frame(path: Path) -> bytes:
+                """Прочитать яркость первого декодированного кадра без внешних библиотек."""
+                result = subprocess.run(
+                    [self.ffmpeg, "-hide_banner", "-loglevel", "error", "-i", str(path),
+                     "-frames:v", "1", "-an", "-c:v", "rawvideo", "-pix_fmt", "yuv420p", "-f", "avi", "-"],
+                    check=True, capture_output=True, creationflags=media_ffmpeg.NO_WINDOW)
+                # Комплектный FFmpeg поддерживает AVI, но не rawvideo muxer.
+                start = result.stdout.index(b"movi") + 4
+                self.assertIn(result.stdout[start:start + 4], (b"00dc", b"00db"))
+                return result.stdout[start + 8:start + 8 + 640 * 360]
+
+            original, encoded = first_frame(source), first_frame(output)
+            self.assertEqual(len(encoded), 640 * 360)
+            error = sum((left - right) ** 2 for left, right in zip(original, encoded, strict=True)) / len(original)
+            self.assertLess(error, 100, f"Первый кадр потерял детали: MSE={error:.1f}")
+
     def test_original_keeps_variable_frame_timing_without_duplication(self) -> None:
         """Вход 60 fps с пропусками кадров нельзя расширять до ровных 60."""
         ffprobe = shutil.which("ffprobe")

@@ -255,7 +255,7 @@ FFmpeg должен быть доступен в `PATH`. Для CPU-стабил
 
 ## Тестирование
 
-В `test_main.py` находятся **34 теста**. Из подготовленного Windows-окружения:
+В `test_main.py` находятся **35 тестов**. Из подготовленного Windows-окружения:
 
 ```powershell
 .\.venv\Scripts\python.exe -m unittest -v test_main
