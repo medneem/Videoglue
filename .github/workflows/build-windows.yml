@@ -161,12 +161,10 @@ jobs:
             throw "External FFmpeg was incorrectly embedded"
           }
 
-      - name: Create verified flat ZIP
+      - name: Stage and validate portable distribution
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
-          $version = "$env:BASE_VERSION.$env:GITHUB_RUN_NUMBER"
-          $archive = "Videoglue-v$version-windows-x64.zip"
           $folder = "release/Videoglue"
           if (Test-Path $folder) { Remove-Item $folder -Recurse -Force }
           New-Item -ItemType Directory -Force $folder | Out-Null
@@ -191,29 +189,13 @@ jobs:
           foreach ($file in $actual) {
             if ($file.Name -notin $expected -or $file.Length -le 0) { throw "Invalid staging file $($file.Name)" }
           }
-          Compress-Archive -Path "$folder/*" -DestinationPath $archive -CompressionLevel Optimal -Force
-          Add-Type -AssemblyName System.IO.Compression
-          $zip = [System.IO.Compression.ZipFile]::OpenRead((Resolve-Path $archive).Path)
-          try {
-            $entries = @($zip.Entries)
-            if ($entries.Count -ne $expected.Count) { throw "Wrong ZIP size" }
-            foreach ($entry in $entries) {
-              if ($entry.FullName -notin $expected -or $entry.Length -le 0) {
-                throw "Unexpected ZIP entry $($entry.FullName)"
-              }
-            }
-            foreach ($name in $expected) {
-              if ($name -notin @($entries | ForEach-Object { $_.FullName })) { throw "Missing ZIP entry $name" }
-            }
-          }
-          finally { $zip.Dispose() }
-          Write-Host "Verified archive $archive"
+          Write-Host "Verified staging folder $folder ($($expected.Count) files)"
 
       - name: Upload portable program
         uses: actions/upload-artifact@v4
         with:
           name: Videoglue-v${{ env.BASE_VERSION }}.${{ github.run_number }}-windows-x64
-          path: Videoglue-v${{ env.BASE_VERSION }}.${{ github.run_number }}-windows-x64.zip
+          path: release/Videoglue/
           if-no-files-found: error
           retention-days: 14
 
@@ -231,6 +213,38 @@ jobs:
         with:
           name: Videoglue-v${{ env.BASE_VERSION }}.${{ github.run_number }}-windows-x64
           path: release
+
+      - name: Package downloaded files for GitHub Release
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import os
+          from pathlib import Path
+          from zipfile import ZipFile, ZIP_DEFLATED
+
+          folder = Path("release")
+          expected = {
+              "Videoglue.exe", "ffmpeg.exe", "ffprobe.exe", "VERSION.txt",
+              "FFMPEG_VERSION.txt", "FFMPEG_SOURCES.txt", "FFMPEG_BUILD.sh",
+              "FFMPEG_NVENC.patch", "LICENSE", "LICENSE_FFMPEG.txt",
+              "THIRD_PARTY_NOTICES.md",
+          }
+          actual = {p.name for p in folder.iterdir()}
+          if actual != expected:
+              raise SystemExit(f"Unexpected release files: missing={expected - actual}; extra={actual - expected}")
+          if any(not (folder / name).is_file() or (folder / name).stat().st_size == 0 for name in expected):
+              raise SystemExit("Missing or empty release file")
+
+          archive = folder / f"Videoglue-v{os.environ['BASE_VERSION']}.{os.environ['GITHUB_RUN_NUMBER']}-windows-x64.zip"
+          with ZipFile(archive, "w", ZIP_DEFLATED, compresslevel=9) as zf:
+              for name in sorted(expected):
+                  zf.write(folder / name, arcname=name)
+          with ZipFile(archive) as zf:
+              if set(zf.namelist()) != expected or zf.testzip() is not None:
+                  raise SystemExit("Invalid release ZIP contents")
+          print(f"Verified release ZIP: {archive}")
+          PY
 
       - name: Create GitHub Release
         shell: bash
