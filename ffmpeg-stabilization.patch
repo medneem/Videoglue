@@ -10,7 +10,17 @@ diff --git a/libavfilter/vf_deshake_opencl.c b/libavfilter/vf_deshake_opencl.c
          scale_x,
          scale_y,
          matrix
-@@ -1476,6 +1476,16 @@ static int filter_frame(AVFilterLink *link, AVFrame *input_frame)
+@@ -1155,7 +1155,9 @@
+     ff_framequeue_global_init(&fqg);
+     ff_framequeue_init(&ctx->fq, &fqg);
+     ctx->eof = 0;
+     ctx->smooth_window = (int)(av_q2d(inl->frame_rate) * ctx->smooth_window_multiplier);
++    // A symmetric window needs one centre frame plus equal past/future halves.
++    ctx->smooth_window = FFMAX(3, ctx->smooth_window | 1);
+     ctx->curr_frame = 0;
+
+     memset(&zeroed_ulong8, 0, sizeof(cl_ulong8));
+@@ -1476,6 +1478,16 @@ static int filter_frame(AVFilterLink *link, AVFrame *input_frame)
          );
      }
  
@@ -27,7 +37,7 @@ diff --git a/libavfilter/vf_deshake_opencl.c b/libavfilter/vf_deshake_opencl.c
      transform_center_scale(
          old_vals[RingbufX] - new_vals[RingbufX],
          old_vals[RingbufY] - new_vals[RingbufY],
-@@ -1856,32 +1866,29 @@ static int queue_frame(AVFilterLink *link, AVFrame *input_frame)
+@@ -1856,32 +1866,37 @@ static int queue_frame(AVFilterLink *link, AVFrame *input_frame)
  
      if (num_vectors < 10) {
          // Not enough matches to get reliable motion data for this frame
@@ -54,12 +64,20 @@ diff --git a/libavfilter/vf_deshake_opencl.c b/libavfilter/vf_deshake_opencl.c
 +    // foreground objects must not drag an otherwise fixed frame around.
 +    {
 +        int stationary = 0;
++        float min_x = input_frame->width, max_x = 0;
++        float min_y = input_frame->height, max_y = 0;
 +        for (int i = 0; i < num_vectors; i++) {
 +            PointPair p = deshake_ctx->matches_contig_host[i].p;
-+            stationary += hypotf(p.p2.s[0] - p.p1.s[0],
-+                                 p.p2.s[1] - p.p1.s[1]) < 0.5f;
++            if (hypotf(p.p2.s[0] - p.p1.s[0], p.p2.s[1] - p.p1.s[1]) < 0.5f) {
++                stationary++;
++                min_x = FFMIN(min_x, p.p1.s[0]); max_x = FFMAX(max_x, p.p1.s[0]);
++                min_y = FFMIN(min_y, p.p1.s[1]); max_y = FFMAX(max_y, p.p1.s[1]);
++            }
 +        }
-+        if (stationary * 5 >= num_vectors * 3)
++        if (stationary * 5 >= num_vectors * 3 ||
++            (stationary >= 10 && stationary * 5 >= num_vectors &&
++             max_x - min_x > input_frame->width * 0.3f &&
++             max_y - min_y > input_frame->height * 0.2f))
 +            goto no_motion_data;
 +    }
 +
@@ -70,11 +88,11 @@ diff --git a/libavfilter/vf_deshake_opencl.c b/libavfilter/vf_deshake_opencl.c
          num_vectors,
          model.matrix,
 -        10.0,
-+        2.0,
++        1.0,
          3000,
          0.999999999999
      )) {
-@@ -1895,6 +1902,9 @@ static int queue_frame(AVFilterLink *link, AVFrame *input_frame)
+@@ -1895,6 +1910,9 @@ static int queue_frame(AVFilterLink *link, AVFrame *input_frame)
          }
      }
  
@@ -84,7 +102,7 @@ diff --git a/libavfilter/vf_deshake_opencl.c b/libavfilter/vf_deshake_opencl.c
      if (!minimize_error(
          deshake_ctx,
          deshake_ctx->inliers,
-@@ -1909,6 +1919,24 @@ static int queue_frame(AVFilterLink *link, AVFrame *input_frame)
+@@ -1909,6 +1927,49 @@ static int queue_frame(AVFilterLink *link, AVFrame *input_frame)
  
      relative = decompose_transform(model.matrix);
  
@@ -106,10 +124,35 @@ diff --git a/libavfilter/vf_deshake_opencl.c b/libavfilter/vf_deshake_opencl.c
 +        goto no_motion_data;
 +    relative.scale.s[0] = relative.scale.s[1] = 1.0f;
 +
++    // Validate rigid motion over the whole image, after discarding affine scale.
++    {
++        int support = 0;
++        float min_x = input_frame->width, max_x = 0;
++        float min_y = input_frame->height, max_y = 0;
++        float c = cosf(relative.rotation), s = sinf(relative.rotation);
++        for (int i = 0; i < num_vectors; i++) {
++            PointPair p = deshake_ctx->matches_contig_host[i].p;
++            float x = p.p1.s[0] - input_frame->width / 2.0f;
++            float y = p.p1.s[1] - input_frame->height / 2.0f;
++            float dx = (c - 1) * x - s * y + relative.translation.s[0];
++            float dy = s * x + (c - 1) * y + relative.translation.s[1];
++            if (hypotf(dx - (p.p2.s[0] - p.p1.s[0]),
++                       dy - (p.p2.s[1] - p.p1.s[1])) <= 1.0f) {
++                support++;
++                min_x = FFMIN(min_x, p.p1.s[0]); max_x = FFMAX(max_x, p.p1.s[0]);
++                min_y = FFMIN(min_y, p.p1.s[1]); max_y = FFMAX(max_y, p.p1.s[1]);
++            }
++        }
++        if (support < 10 || support * 5 < num_vectors * 3 ||
++            max_x - min_x < input_frame->width * 0.5f ||
++            max_y - min_y < input_frame->height * 0.5f)
++            goto no_motion_data;
++    }
++
      // Get the absolute transform data for the previous frame
      for (int i = 0; i < RingbufCount; i++) {
          av_fifo_peek(
-@@ -1943,6 +1971,15 @@ no_motion_data:
+@@ -1943,6 +2004,15 @@ no_motion_data:
      new_vals[RingbufScaleX] = 1.0f;
      new_vals[RingbufScaleY] = 1.0f;
  
@@ -125,7 +168,7 @@ diff --git a/libavfilter/vf_deshake_opencl.c b/libavfilter/vf_deshake_opencl.c
      for (int i = 0; i < num_vectors; i++) {
          deshake_ctx->matches_contig_host[i].should_consider = 0;
      }
-@@ -1950,7 +1987,7 @@ no_motion_data:
+@@ -1950,7 +2020,7 @@ no_motion_data:
  
      if (deshake_ctx->debug_on) {
          av_log(avctx, AV_LOG_VERBOSE,
@@ -134,7 +177,7 @@ diff --git a/libavfilter/vf_deshake_opencl.c b/libavfilter/vf_deshake_opencl.c
          );
      }
  
-@@ -2041,7 +2078,7 @@ static int activate(AVFilterContext *ctx)
+@@ -2041,7 +2111,7 @@ static int activate(AVFilterContext *ctx)
                  // See if we have enough buffered frames to process one
                  //
                  // "enough" is half the smooth window of queued frames into the future

@@ -19,7 +19,7 @@ from settings import AUDIO_QUALITIES, FRAME_RATES, RESOLUTIONS
 # Число соседних кадров, учитываемых при сглаживании движения камеры.
 # Большие значения дают более плавную картинку, но сильнее ограничивают
 # намеренное движение камеры и могут потребовать большей обрезки краёв.
-STABILIZATION_SMOOTHING = {"Слабый": 5, "Средний": 12, "Сильный": 25}
+STABILIZATION_SMOOTHING = {"Слабый": 5, "Средний": 20, "Сильный": 60}
 QUALITY_BITRATE = {"Максимальное": 0.90, "Высокое": 0.70,
                    "Компактное": 0.45, "Малое": 0.25}
 # Ограничиваем бюджет H.264 по числу выходных пикселей в секунду:
@@ -28,6 +28,7 @@ QUALITY_PIXEL_BUDGET = {"Максимальное": 0.30, "Высокое": 0.20
                         "Компактное": 0.14, "Малое": 0.10}
 # У OpenCL другой алгоритм и другая шкала сглаживания, чем у vidstab.
 OPENCL_SMOOTHING = {"Слабый": 0.2, "Средний": 0.5, "Сильный": 0.8}
+OPENCL_WINDOW = {"Слабый": 0.5, "Средний": 1.0, "Сильный": 2.0}
 # По умолчанию FFmpeg выделяет число потоков фильтра по всем логическим
 # ядрам. Для десятков входов это создаёт сотни потоков и расходует гигабайты
 # памяти; небольшому графу достаточно ограниченного пула.
@@ -238,7 +239,7 @@ def filtered_inputs(manifest: Path, videos: list[Path], field_orders: list[str |
             # роликах и может превратить кадр в чёрный. Оставляем отражение краёв.
             filters += (",hwupload,deshake_opencl="
                         f"smooth_strength={OPENCL_SMOOTHING[stabilization]}:"
-                        "smooth_window_multiplier=0.5:adaptive_crop=0,"
+                        f"smooth_window_multiplier={OPENCL_WINDOW[stabilization]}:adaptive_crop=0,"
                         "hwdownload,format=yuv420p,setpts=PTS-STARTPTS")
         elif stabilizing:
             # Ограничиваем коррекцию, чтобы движение объектов и неуверенные

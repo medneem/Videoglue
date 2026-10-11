@@ -1,18 +1,26 @@
 diff --git a/src/localmotion2transform.c b/src/localmotion2transform.c
 --- a/src/localmotion2transform.c
 +++ b/src/localmotion2transform.c
-@@ -163,6 +163,18 @@ VSTransform vsMotionsToTransform(VSTransformData* td,
+@@ -163,6 +163,26 @@ VSTransform vsMotionsToTransform(VSTransformData* td,
      if (f) fprintf(f,"0 0 0 0 0 %i\n# no fields\n", t.extra);
      return t;
    }
 +  // A fixed background must win over independently moving foreground fields.
 +  int stationary = 0;
 +  int count = vs_vector_size(motions);
++  int minx = td->fiSrc.width, maxx = 0;
++  int miny = td->fiSrc.height, maxy = 0;
 +  for(int i=0; i<count; i++){
 +    const LocalMotion* lm = LMGet(motions,i);
-+    stationary += lm->v.x == 0 && lm->v.y == 0;
++    if(lm->v.x == 0 && lm->v.y == 0){
++      stationary++;
++      minx = VS_MIN(minx, lm->f.x); maxx = VS_MAX(maxx, lm->f.x);
++      miny = VS_MIN(miny, lm->f.y); maxy = VS_MAX(maxy, lm->f.y);
++    }
 +  }
-+  if(stationary * 5 >= count * 3){
++  if(stationary * 5 >= count * 3 ||
++     (stationary >= 10 && stationary * 5 >= count &&
++      maxx-minx > td->fiSrc.width*0.3 && maxy-miny > td->fiSrc.height*0.2)){
 +    t = null_transform();
 +    if(f) fprintf(f,"0 0 0 0 0 0\n# stationary background\n");
 +    return t;
@@ -20,13 +28,36 @@ diff --git a/src/localmotion2transform.c b/src/localmotion2transform.c
    VSArray missmatches = vs_array_new(vs_vector_size(motions));
    VSArray params = vsTransformToArray(&t);
    double residual;
-@@ -202,8 +214,11 @@ VSTransform vsMotionsToTransform(VSTransformData* td,
+@@ -199,11 +219,34 @@ VSTransform vsMotionsToTransform(VSTransformData* td,
+     vs_log_info(td->conf.modName, "disabled (%i+%i)/%i,\tresidual: %f (%i)\n",
+                 dis1, dis2, vs_vector_size(motions), residual, k+1);
+   t = vsArrayToTransform(result);
++  // Camera motion needs support across the frame, not merely a good fit to
++  // a moving actor. Validate the rigid correction actually used by the renderer.
++  VSTransform rigid = t;
++  rigid.zoom = 0;
++  PreparedTransform pt = prepare_transform(&rigid, &td->fiSrc);
++  int support = 0;
++  minx = td->fiSrc.width; maxx = 0;
++  miny = td->fiSrc.height; maxy = 0;
++  for(int i=0; i<count; i++){
++    const LocalMotion* lm = LMGet(motions,i);
++    double x,y;
++    transform_vec_double(&x, &y, &pt, (const Vec*)&lm->f);
++    if(hypot(x-lm->f.x-lm->v.x, y-lm->f.y-lm->v.y) <= 1.25){
++      support++;
++      minx = VS_MIN(minx, lm->f.x); maxx = VS_MAX(maxx, lm->f.x);
++      miny = VS_MIN(miny, lm->f.y); maxy = VS_MAX(maxy, lm->f.y);
++    }
++  }
    vs_array_free(result);
    vs_array_free(missmatches);
    // check if sufficiently good match was achieved:
 -  if(residual>100){ // test threshold.
 -    t.extra=1;
-+  if(!isfinite(residual) || residual>25 ||
++  if(support < 10 || support * 5 < count * 3 ||
++     maxx-minx < td->fiSrc.width*0.5 || maxy-miny < td->fiSrc.height*0.5 ||
++     !isfinite(residual) || residual>25 ||
 +     !isfinite(t.x) || !isfinite(t.y) || !isfinite(t.alpha) ||
 +     fabs(t.x)>td->fiSrc.width*0.1 || fabs(t.y)>td->fiSrc.height*0.1 ||
 +     fabs(t.alpha)>0.05){
