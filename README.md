@@ -44,6 +44,8 @@
 1. Скачайте ZIP по ссылке [GitHub Releases](https://github.com/medneem/Videoglue/releases/latest) (`Videoglue-v0.1.N-windows-x64.zip`).
 2. Распакуйте в **новую папку**, запустите `Videoglue.exe`.
 
+**Важно:** для стабилизации подходит только проверенная сборка **FFmpeg 7.1.5**. Релиз [v0.1.2](https://github.com/medneem/Videoglue/releases/tag/v0.1.2) содержит другую версию FFmpeg и **не подходит для стабилизации**. До следующего корректного релиза используйте проверенный FFmpeg 7.1.5.
+
 Python не требуется. Файлы `ffmpeg.exe` и `ffprobe.exe` находятся рядом с приложением. Папки `_internal` нет. Приложение может работать на CPU без NVIDIA. Для GPU-обработки нужна видеокарта NVIDIA с подходящим драйвером и поддержкой CUDA/OpenCL.
 
 Если готового релиза ещё нет, используйте [исходники](#запуск-из-исходников) или [соберите EXE](#сборка-exe). После локальной сборки он находится в `dist\Videoglue.exe`.
@@ -288,7 +290,7 @@ py -3.13 -m PyInstaller --noconfirm --clean Videoglue.spec
 [Windows pipeline](https://github.com/medneem/Videoglue/actions/workflows/build-windows.yml) запускается при push в `master`, pull request и вручную.
 Номер релиза: `0.1.<github.run_number>` (например, `0.1.42`); Git-тег — `v0.1.42`; архив — `Videoglue-v0.1.42-windows-x64.zip`. Базовая версия `BASE_VERSION` задаётся в workflow. Номер версии отображается в заголовке программы, ресурсах Windows EXE и `VERSION.txt`.
 
-CI устанавливает Python, запускает тесты, загружает **Gyan FFmpeg Full x64** (нужен OpenCL), проверяет SHA-256 и доступность фильтров, собирает EXE и плоский ZIP. Архив проверяется на наличие обязательных файлов и отсутствие `_internal`.
+CI устанавливает Python, запускает тесты, получает **фиксированную, ранее проверенную сборку FFmpeg 7.1.5** из служебного GitHub Release, сверяет SHA-256, версии обоих бинарников и наличие фильтров стабилизации, затем собирает EXE и плоский ZIP. Никакой автоматической загрузки «последнего FFmpeg» нет. Архив проверяется на наличие обязательных файлов и отсутствие `_internal`.
 
 Состав архива:
 
@@ -305,11 +307,23 @@ THIRD_PARTY_NOTICES.md
 
 После успешного запуска на `master` ZIP публикуется в **Actions → Artifacts** (14 дней) и в **GitHub Releases**. В pull request создаётся только артефакт, без релиза. Повторный запуск использует тот же номер версии.
 
-**Примечание о совместимости:** для Gyan FFmpeg 8.1.2 и 9.0.2 ранее наблюдались ошибки OpenCL-стабилизации на NVIDIA. CI проверяет наличие фильтров, но не может проверить GPU-обработку на Windows runner. При необходимости можно заменить внешний `ffmpeg.exe` проверенной собственной сборкой без пересборки Videoglue.
+**Обязательное условие:** Videoglue использует **FFmpeg 7.1.5**, причём именно проверенную сборку со стабилизатором и NVIDIA/OpenCL. Номер 7.1.5 без проверки фактической работы недостаточен. CI не может проверить реальную NVIDIA на стандартном runner; поэтому дополнительная проверка SHA-256 не позволяет подменить ранее одобренную сборку. Внешние бинарники можно заменить без пересборки EXE.
+
+### Как предоставить FFmpeg 7.1.5 для CI
+
+Один раз подготовьте **проверенную на вашей NVIDIA** сборку и загрузите ZIP в отдельный служебный GitHub Release:
+
+1. Убедитесь, что `ffmpeg.exe -version` и `ffprobe.exe -version` оба показывают **7.1.5**. Сборка FFmpeg должна содержать `vidstabdetect`, `vidstabtransform`, `deshake_opencl`, `bwdif_cuda` и `h264_nvenc`.
+2. Запакуйте `ffmpeg.exe` и `ffprobe.exe` в `ffmpeg-7.1.5-windows-x64.zip`. Оба файла должны быть от совместимой 7.1.5-сборки.
+3. В **GitHub → Releases → Draft a new release** создайте отдельный выпуск с тегом **`ffmpeg-7.1.5-toolchain`**, прикрепите указанный ZIP (можно отметить выпуск как prerelease).
+4. Посчитайте SHA-256 **всего ZIP**: `(Get-FileHash .\ffmpeg-7.1.5-windows-x64.zip -Algorithm SHA256).Hash`. Запишите результат в переменную репозитория **Settings → Secrets and variables → Actions → Variables → `FFMPEG_715_SHA256`**.
+5. Повторно запустите [Windows workflow](https://github.com/medneem/Videoglue/actions/workflows/build-windows.yml).
+
+Если ZIP или его SHA-256 отсутствует, либо версия любого из бинарников отличается от **7.1.5**, сборка **завершается ошибкой без публикации релиза**. Таким образом CI не заменит работающий FFmpeg новой версией автоматически.
 
 ## FFmpeg и совместимость
 
-Исторически проект использовал собственную Windows x64-сборку **FFmpeg 7.1.5** из тега `n7.1.5`. Новый GitHub CI использует Gyan Full. Ниже оставлены сведения о прежней сборке. Она включает CPU-кодирование, NVENC, CUDA-деинтерлейсинг и OpenCL-стабилизацию. Рядом с приложением не нужны DLL FFmpeg, x264 или vid.stab; для GPU по-прежнему нужен драйвер NVIDIA.
+Проект требует собственную **проверенную Windows x64-сборку FFmpeg 7.1.5** из тега `n7.1.5`. Новые Gyan FFmpeg 8/9 не подходят для GPU-стабилизации. Ниже оставлены сведения об используемой конфигурации. Она включает CPU-кодирование, NVENC, CUDA-деинтерлейсинг и OpenCL-стабилизацию. Рядом с приложением не нужны DLL FFmpeg, x264 или vid.stab; для GPU по-прежнему нужен драйвер NVIDIA.
 
 Исторический `build_ffmpeg.sh` собирал бинарник из Ubuntu/WSL с помощью MinGW. В текущем GitHub-репозитории этого скрипта нет; следующие команды требуют получить его из прежних исходников. Установите инструменты и запустите скрипт, подставив свой путь к проекту:
 
@@ -365,6 +379,7 @@ bash /mnt/d/ARCHIV/MULTIMEDIA/Videoglue/build_ffmpeg.sh
 | `build_ffmpeg.sh`, `ffmpeg-nvenc-rate.patch` | Исторические инструменты собственной FFmpeg-сборки (отсутствуют в текущем GitHub-репозитории) |
 | `.github/workflows/build-windows.yml` | GitHub Actions, ZIP, Releases |
 | `version.py`, `scripts/stamp_version.py` | Версионирование |
+| `scripts/check_ffmpeg_toolchain.py` | Проверка FFmpeg и FFprobe 7.1.5 |
 | `test_release.py` | Тесты версии и пути FFmpeg |
 | `THIRD_PARTY_NOTICES.md` | Сторонние лицензии |
 | `requirements.txt` | Python-зависимости приложения |

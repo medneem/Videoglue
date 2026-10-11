@@ -49,38 +49,143 @@ jobs:
           python -m unittest -v test_release
           if ($LASTEXITCODE -ne 0) { throw "Release unit tests failed" }
 
-      - name: Download Gyan FFmpeg Full x64
+      - name: Fetch the pinned FFmpeg 7.1.5 toolchain
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          FFMPEG_ARCHIVE_SHA256: ${{ vars.FFMPEG_715_SHA256 }}
+        run: |
+          $ErrorActionPreference = "Stop"
+          # The source must be a tested, immutable pair of ffmpeg.exe + ffprobe.exe.
+          # Never use a floating "latest" FFmpeg download.
+          if ($env:FFMPEG_ARCHIVE_SHA256 -notmatch '^[0-9a-fA-F]{64}      - name: Run application tests
+        shell: pwsh
+        run: |
+          python -m unittest -v test_main
+          if ($LASTEXITCODE -ne 0) { throw "Application tests failed" }
+
+      - name: Build onefile EXE
+        shell: pwsh
+        run: |
+          python -m PyInstaller --noconfirm --clean Videoglue.spec
+          if ($LASTEXITCODE -ne 0) { throw "PyInstaller failed" }
+          if (-not (Test-Path dist/Videoglue.exe -PathType Leaf)) { throw "EXE missing" }
+          $toc = & pyi-archive_viewer -l dist/Videoglue.exe | Out-String
+          if ($LASTEXITCODE -ne 0 -or $toc -match "ffmpeg\.exe|ffprobe\.exe") {
+            throw "External FFmpeg was incorrectly embedded"
+          }
+
+      - name: Create verified flat ZIP
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
+          $version = "$env:BASE_VERSION.$env:GITHUB_RUN_NUMBER"
+          $archive = "Videoglue-v$version-windows-x64.zip"
+          $folder = "release/Videoglue"
+          if (Test-Path $folder) { Remove-Item $folder -Recurse -Force }
+          New-Item -ItemType Directory -Force $folder | Out-Null
+          Copy-Item dist/Videoglue.exe $folder
+          Copy-Item tools/ffmpeg.exe $folder
+          Copy-Item tools/ffprobe.exe $folder
+          Copy-Item tools/FFMPEG_VERSION.txt $folder
+          Copy-Item tools/LICENSE_FFMPEG.txt $folder
+          Copy-Item LICENSE $folder
+          Copy-Item THIRD_PARTY_NOTICES.md $folder
+          Set-Content "$folder/VERSION.txt" -Value $version -Encoding utf8
+          $expected = @("Videoglue.exe","ffmpeg.exe","ffprobe.exe","VERSION.txt",
+                        "FFMPEG_VERSION.txt","LICENSE","LICENSE_FFMPEG.txt","THIRD_PARTY_NOTICES.md")
+          $actual = @(Get-ChildItem $folder -File)
+          if (@(Get-ChildItem $folder -Directory).Count -or $actual.Count -ne $expected.Count) {
+            throw "Unexpected staging layout"
+          }
+          foreach ($file in $actual) {
+            if ($file.Name -notin $expected -or $file.Length -le 0) { throw "Invalid staging file $($file.Name)" }
+          }
+          Compress-Archive -Path "$folder/*" -DestinationPath $archive -CompressionLevel Optimal -Force
+          Add-Type -AssemblyName System.IO.Compression
+          $zip = [System.IO.Compression.ZipFile]::OpenRead((Resolve-Path $archive).Path)
+          try {
+            $entries = @($zip.Entries)
+            if ($entries.Count -ne $expected.Count) { throw "Wrong ZIP size" }
+            foreach ($entry in $entries) {
+              if ($entry.FullName -notin $expected -or $entry.Length -le 0) {
+                throw "Unexpected ZIP entry $($entry.FullName)"
+              }
+            }
+            foreach ($name in $expected) {
+              if ($name -notin @($entries | ForEach-Object { $_.FullName })) { throw "Missing ZIP entry $name" }
+            }
+          }
+          finally { $zip.Dispose() }
+          Write-Host "Verified archive $archive"
+
+      - name: Upload portable program
+        uses: actions/upload-artifact@v4
+        with:
+          name: Videoglue-v${{ env.BASE_VERSION }}.${{ github.run_number }}-windows-x64
+          path: Videoglue-v${{ env.BASE_VERSION }}.${{ github.run_number }}-windows-x64.zip
+          if-no-files-found: error
+          retention-days: 14
+
+  release:
+    name: Publish GitHub Release
+    needs: windows-portable
+    if: github.ref == 'refs/heads/master' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - name: Download successful artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: Videoglue-v${{ env.BASE_VERSION }}.${{ github.run_number }}-windows-x64
+          path: release
+
+      - name: Create GitHub Release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          tag="v$BASE_VERSION.$GITHUB_RUN_NUMBER"
+          zip="release/Videoglue-$tag-windows-x64.zip"
+          test -s "$zip"
+          if gh release view "$tag" >/dev/null 2>&1; then
+            gh release upload "$tag" "$zip" --clobber
+          else
+            gh release create "$tag" "$zip" --target "$GITHUB_SHA" \
+              --title "Videoglue $tag" \
+              --notes "Windows x64, pipeline #$GITHUB_RUN_NUMBER. Распакуйте ZIP в новую папку; FFmpeg/FFprobe лежат рядом с Videoglue.exe." \
+              --latest
+          fi
+) {
+            throw "Set repository Actions variable FFMPEG_715_SHA256 to the SHA-256 of the tested FFmpeg 7.1.5 ZIP. Do not release with an unverified FFmpeg build."
+          }
           New-Item -ItemType Directory -Force tools | Out-Null
-          $url = "https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-full.7z"
-          Invoke-WebRequest -Uri $url -OutFile tools/ffmpeg-full.7z
-          $expectedText = (Invoke-WebRequest -Uri "$url.sha256").Content
-          if ($expectedText -is [byte[]]) { $expectedText = [Text.Encoding]::UTF8.GetString($expectedText) }
-          $expected = [regex]::Match([string]$expectedText, '[A-Fa-f0-9]{64}').Value
-          $actual = (Get-FileHash tools/ffmpeg-full.7z -Algorithm SHA256).Hash
-          if (-not $expected -or $actual -ine $expected) { throw "FFmpeg checksum mismatch" }
-          & 7z x "-otools/unpacked" -y tools/ffmpeg-full.7z | Out-Null
-          if ($LASTEXITCODE -ne 0) { throw "Cannot unpack FFmpeg" }
-          $ffmpeg = Get-ChildItem tools/unpacked -Recurse -File -Filter ffmpeg.exe | Select-Object -First 1
-          $ffprobe = Get-ChildItem tools/unpacked -Recurse -File -Filter ffprobe.exe | Select-Object -First 1
-          if (-not $ffmpeg -or -not $ffprobe) { throw "Missing ffmpeg.exe or ffprobe.exe" }
-          Copy-Item $ffmpeg.FullName tools/ffmpeg.exe
-          Copy-Item $ffprobe.FullName tools/ffprobe.exe
+          $asset = "ffmpeg-7.1.5-windows-x64.zip"
+          gh release download "ffmpeg-7.1.5-toolchain" --repo "$env:GITHUB_REPOSITORY" --pattern "$asset" --dir tools
+          if ($LASTEXITCODE -ne 0 -or -not (Test-Path "tools/$asset" -PathType Leaf)) {
+            throw "Missing pinned FFmpeg 7.1.5 archive. Upload $asset to the ffmpeg-7.1.5-toolchain GitHub release."
+          }
+          $actual = (Get-FileHash "tools/$asset" -Algorithm SHA256).Hash
+          if ($actual -ine $env:FFMPEG_ARCHIVE_SHA256) { throw "Pinned FFmpeg 7.1.5 archive SHA256 mismatch" }
+          Expand-Archive -LiteralPath "tools/$asset" -DestinationPath "tools/unpacked" -Force
+          $ffmpeg = @(Get-ChildItem tools/unpacked -Recurse -File -Filter ffmpeg.exe)
+          $ffprobe = @(Get-ChildItem tools/unpacked -Recurse -File -Filter ffprobe.exe)
+          if ($ffmpeg.Count -ne 1 -or $ffprobe.Count -ne 1) {
+            throw "Pinned archive must contain exactly one ffmpeg.exe and one ffprobe.exe"
+          }
+          Copy-Item $ffmpeg[0].FullName tools/ffmpeg.exe
+          Copy-Item $ffprobe[0].FullName tools/ffprobe.exe
+          python scripts/check_ffmpeg_toolchain.py tools/ffmpeg.exe tools/ffprobe.exe
+          if ($LASTEXITCODE -ne 0) { throw "Wrong FFmpeg version or required stabilization feature missing" }
           Copy-Item tools/ffmpeg.exe ffmpeg.exe
           Add-Content -Path $env:GITHUB_PATH -Value (Resolve-Path tools).Path
           $version = & tools/ffmpeg.exe -version | Select-Object -First 1
-          if ($LASTEXITCODE -ne 0) { throw "Cannot execute ffmpeg.exe" }
           Set-Content tools/FFMPEG_VERSION.txt -Value $version -Encoding utf8
-          & tools/ffprobe.exe -version | Select-Object -First 1
-          if ($LASTEXITCODE -ne 0) { throw "Cannot execute ffprobe.exe" }
-          $filters = & tools/ffmpeg.exe -hide_banner -filters | Out-String
-          foreach ($filter in @("vidstabdetect","vidstabtransform","deshake_opencl","bwdif_cuda")) {
-            if ($filters -notmatch "\b$filter\b") { throw "FFmpeg filter missing: $filter" }
-          }
-          $encoders = & tools/ffmpeg.exe -hide_banner -encoders | Out-String
-          if ($encoders -notmatch "\bh264_nvenc\b") { throw "NVENC codec missing" }
           Invoke-WebRequest -Uri https://www.gnu.org/licenses/gpl-3.0.txt -OutFile tools/LICENSE_FFMPEG.txt
           if ((Get-Item tools/LICENSE_FFMPEG.txt).Length -lt 10000) { throw "Missing GPLv3 license text" }
 
