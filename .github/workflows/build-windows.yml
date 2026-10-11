@@ -165,6 +165,7 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
+          $version = "$env:BASE_VERSION.$env:GITHUB_RUN_NUMBER"
           $folder = "release/Videoglue"
           if (Test-Path $folder) { Remove-Item $folder -Recurse -Force }
           New-Item -ItemType Directory -Force $folder | Out-Null
