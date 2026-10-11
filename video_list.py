@@ -658,7 +658,7 @@ class VideoListMixin:
     def start_scan(self, ffmpeg: str, paths: list[Path]) -> None:
         """Запустить чтение длительностей в фоне, настроив прогресс по файлам."""
         self.prepare_progress(1)
-        self.progress_label_var.set("Добавление файлов")
+        self.progress_label_var.set(f"Чтение видео: 0 из {len(paths)}")
         self.progress.configure(mode="determinate", maximum=len(paths), value=0)
         self.set_busy(True)
         self.status.set(f"Чтение длительности: 0 из {len(paths)}")
@@ -723,6 +723,7 @@ class VideoListMixin:
         # Краткий цветовой переход помогает заметить каждую поступившую строку.
         self.schedule_row_arrival(row)
         self.progress.configure(value=index)
+        self.progress_label_var.set(f"Чтение видео: {index} из {total}")
         self.status.set(f"Чтение длительности: {index} из {total}")
 
     def finish_row_arrival(self, row: str) -> None:
@@ -748,4 +749,5 @@ class VideoListMixin:
         """Разблокировать настройки после чтения списка роликов."""
         self.set_busy(False)
         self.update_videos()
+        self.progress_label_var.set(f"Готово к склейке: {len(self.videos)} видео")
         self.status.set(f"Готово к склейке: {len(self.videos)} видео (по порядку в таблице)")
