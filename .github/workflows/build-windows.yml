@@ -21,7 +21,15 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Restore cached FFmpeg 7.1.5 binaries
+        id: ffmpeg-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: .ffmpeg-build/output
+          key: ffmpeg-7.1.5-win64-ubuntu2404-mingw-v1-${{ hashFiles('build_ffmpeg.sh', 'ffmpeg-nvenc-rate.patch') }}
+
       - name: Install cross-build dependencies
+        if: steps.ffmpeg-cache.outputs.cache-hit != 'true'
         run: |
           sudo apt-get update
           sudo apt-get install -y \
@@ -30,6 +38,7 @@ jobs:
             autoconf automake libtool python3
 
       - name: Cross-compile pinned sources and NVENC patch
+        if: steps.ffmpeg-cache.outputs.cache-hit != 'true'
         env:
           JOBS: "4"
         run: bash build_ffmpeg.sh "$GITHUB_WORKSPACE/.ffmpeg-build"
@@ -41,7 +50,31 @@ jobs:
           file .ffmpeg-build/output/ffprobe.exe | grep -q "PE32+ executable"
           test -s .ffmpeg-build/output/sources.txt
           grep -q "b35605ace3ddf7c1a5d67a2eb553f034aef41d55" .ffmpeg-build/output/sources.txt
-          sha256sum .ffmpeg-build/output/ffmpeg.exe .ffmpeg-build/output/ffprobe.exe
+          # Verify both cached and freshly compiled executables against their recorded hashes.
+          for exe in ffmpeg.exe ffprobe.exe; do
+            expected=$(awk -v exe="$exe" '$2 ~ ("/" exe "$") { print $1 }' .ffmpeg-build/output/sources.txt)
+            test "$expected" != ""
+            actual=$(sha256sum ".ffmpeg-build/output/$exe" | cut -d ' ' -f 1)
+            if [[ "$expected" != "$actual" ]]; then
+              echo "::error::FFmpeg cache/build integrity check failed: $exe"
+              exit 1
+            fi
+          done
+          # Ensure the cached sources are exactly those in this checkout.
+          for source in build_ffmpeg.sh ffmpeg-nvenc-rate.patch; do
+            expected=$(awk -v source="$source" '$2 ~ ("/" source "$") { print $1 }' .ffmpeg-build/output/sources.txt)
+            test "$expected" != ""
+            actual=$(sha256sum "$source" | cut -d ' ' -f 1)
+            test "$expected" = "$actual"
+          done
+          echo "FFmpeg 7.1.5 binary integrity and source revision verified"
+
+      - name: Save verified FFmpeg binaries to cache
+        if: steps.ffmpeg-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: .ffmpeg-build/output
+          key: ${{ steps.ffmpeg-cache.outputs.cache-primary-key }}
 
       - name: Upload FFmpeg 7.1.5 toolchain artifact
         uses: actions/upload-artifact@v4
