@@ -232,7 +232,7 @@ class VideoListTests(unittest.TestCase):
                 unsupported = folder / "notes.txt"
                 for path in (first, second, third, unsupported):
                     path.touch()
-                self.assertEqual(app.choose_button.cget("text"), "Добавить видео")
+                self.assertEqual(app.choose_button.cget("text"), "＋  Добавить видео")
                 with patch.object(video_list, "probe_media", return_value=media_ffmpeg.MediaInfo(duration=3.0)), \
                         patch.object(video_list.filedialog, "askopenfilenames",
                                      side_effect=[(str(first),), (str(first), str(second), str(unsupported), str(third)),
@@ -290,9 +290,11 @@ class VideoListTests(unittest.TestCase):
                 self.assertEqual(app.selected_duration.get(), "Общий хронометраж выбранных видео: 00:00:04")
                 self.assertEqual(app.tree.set(rows[2], "duration"), "Ошибка чтения")
                 app.update()
+                # В новой теме заголовок выше: координату берём внутри строки.
+                row_y = app.tree.bbox(rows[0], "name")[1] + 5
                 with patch.object(app.tree, "identify_column", return_value="#1"), \
                         patch.object(app.tree, "identify_row", return_value=rows[0]):
-                    app.start_row_drag(SimpleNamespace(x=20, y=30))
+                    app.start_row_drag(SimpleNamespace(x=20, y=row_y))
                 self.assertEqual(app.videos, [second])
                 self.assertEqual(app.selected_duration.get(), "Общий хронометраж выбранных видео: 00:00:02")
                 self.assertNotIn(rows[0], app.included_rows)
