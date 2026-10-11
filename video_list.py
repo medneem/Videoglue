@@ -78,70 +78,68 @@ class VideoListMixin:
         top = ttk.Frame(self, padding=12)
         top.grid(row=0, column=0, sticky="ew")
         top.columnconfigure(1, weight=1)
-        self.choose_button = ttk.Button(top, text="Добавить видео", command=self.choose_files)
+        self.choose_button = ttk.Button(
+            top, text="＋  Добавить видео", command=self.choose_files,
+            style="Primary.TButton")
         self.choose_button.grid(row=0, column=0, padx=(0, 12))
-        self.folder_label = ttk.Label(top, text="Файлы не выбраны")
+        self.folder_label = ttk.Label(top, text="Файлы не выбраны", style="Muted.TLabel")
         self.folder_label.grid(row=0, column=1, sticky="ew")
+        self.about_button = ttk.Button(
+            top, text="ⓘ  О программе", command=self.show_about)
+        self.about_button.grid(row=0, column=2, sticky="e")
 
-        # Подсказка остаётся видимой и после загрузки списка.
+        # Пустое состояние расположено прямо в таблице, без второй зоны загрузки.
         table = ttk.Frame(self, padding=(12, 0, 12, 0))
         table.grid(row=1, column=0, sticky="nsew")
         table.columnconfigure(0, weight=1)
-        table.rowconfigure(1, weight=1)
-        self.drop_hint = tk.StringVar(value="↓  Перетащите сюда видео из Проводника  ·  тяните строки для изменения порядка")
-        ttk.Label(table, textvariable=self.drop_hint).grid(row=0, column=0, columnspan=2,
-                                                            sticky="w", pady=(0, 7))
-        self.drop_surface = tk.Frame(table, background="#d7dfe9", padx=2, pady=2)
-        self.drop_surface.grid(row=1, column=0, columnspan=2, sticky="nsew")
+        table.rowconfigure(0, weight=1)
+        self.drop_hint = tk.StringVar(value="")
+        self.drop_surface = tk.Frame(
+            table, background=self.colors["border"], padx=1, pady=1)
+        self.drop_surface.grid(row=0, column=0, columnspan=2, sticky="nsew")
         self.drop_surface.columnconfigure(0, weight=1)
         self.drop_surface.rowconfigure(0, weight=1)
         style = ttk.Style(self)
-        style.configure("Video.Treeview", rowheight=30, font=("TkDefaultFont", 10))
-        style.configure("Video.Treeview.Heading", font=("TkDefaultFont", 10, "bold"))
         self.tree = ttk.Treeview(self.drop_surface, columns=("include", "number", "name", "size", "duration", "remove"),
                                  show="headings", style="Video.Treeview", selectmode="browse")
         self.tree.heading("include", text="", command=self.toggle_all_rows)
-        self.tree.heading("number", text="Номер файла")
+        self.tree.heading("number", text="№")
         self.tree.heading("name", text="Файл")
         self.tree.heading("size", text="Размер, МиБ")
         self.tree.heading("duration", text="Длительность")
         self.tree.heading("remove", text="", command=self.clear_files)
         self.tree.column("include", width=48, minwidth=48, anchor="center", stretch=False)
-        self.tree.column("number", width=105, anchor="center", stretch=False)
+        self.tree.column("number", width=64, minwidth=54, anchor="center", stretch=False)
         self.tree.column("name", width=300)
         self.tree.column("size", width=110, anchor="e", stretch=False)
         self.tree.column("duration", width=140, anchor="center", stretch=False)
         self.tree.column("remove", width=42, minwidth=42, anchor="center", stretch=False)
         self.tree.grid(row=0, column=0, sticky="nsew")
-        self.tree.tag_configure("stripe", background="#f1f5fa")
-        self.tree.tag_configure("drop_target", background="#c6e2ff", foreground="#133b68")
-        self.tree.tag_configure("drop_gap", background="#dbeeff", foreground="#1873bf",
-                                font=("TkDefaultFont", 10, "bold"))
-        self.tree.tag_configure("arrive", background="#c9f2da", foreground="#174b32")
-        self.tree.tag_configure("drag_source", background="#e4eaf2", foreground="#8a98a9")
-        self.tree.tag_configure("remove_press", background="#ffcad3", foreground="#a41636",
-                                font=("TkDefaultFont", 11, "bold"))
-        self.tree.tag_configure("remove_fade", background="#fbe9ec", foreground="#b68590")
         scrollbar = ttk.Scrollbar(self.drop_surface, orient="vertical", command=self.tree.yview)
         scrollbar.grid(row=0, column=1, sticky="ns")
         self.tree.configure(yscrollcommand=lambda first, last: self.on_tree_scroll(
             scrollbar, first, last))
         self.tree.bind("<Configure>", self.schedule_icon_refresh, add="+")
         self.tree.bind("<<TreeviewSelect>>", self.schedule_icon_refresh, add="+")
-        heading_background = style.lookup("Treeview.Heading", "background") or "#f0f0f0"
+        heading_background = self.colors["header"]
         self.heading_icon = tk.Canvas(self.tree, width=ICON_SIZE, height=ICON_SIZE,
                                       highlightthickness=0, background=heading_background, cursor="hand2")
         self.heading_icon.place(x=(self.tree.column("include", "width") - ICON_SIZE) // 2, y=3)
         self.heading_icon.bind("<Button-1>", lambda _event: self.toggle_all_rows())
-        draw_bootstrap_icon(self.heading_icon, "empty", "#375c83")
+        draw_bootstrap_icon(self.heading_icon, "empty", self.colors["muted"])
         self.clear_icon = tk.Canvas(self.tree, width=ICON_SIZE, height=ICON_SIZE,
                                     highlightthickness=0, background=heading_background, cursor="hand2")
         self.clear_icon.bind("<Button-1>", lambda _event: self.clear_files())
-        draw_bootstrap_icon(self.clear_icon, "remove", "#be2437")
-        self.empty_hint = tk.Label(self.tree, text="＋  Добавьте видеоролики\n\n"
-                                  "Перетащите файлы сюда или добавьте видео кнопкой выше",
-                                  background="#f8fbff", foreground="#405975",
-                                  font=("TkDefaultFont", 11), padx=26, pady=20)
+        draw_bootstrap_icon(self.clear_icon, "remove", self.colors["error"])
+        self.empty_hint = tk.Frame(self.tree, padx=28, pady=25)
+        self.empty_title = tk.Label(
+            self.empty_hint, text="▶  Перетащите сюда видео из Проводника",
+            font=("Segoe UI", 12, "bold"))
+        self.empty_title.pack(pady=(0, 7))
+        self.empty_subtitle = tk.Label(
+            self.empty_hint, text="или нажмите «Добавить видео» сверху",
+            font=("Segoe UI", 10))
+        self.empty_subtitle.pack()
         self.empty_hint.place(relx=0.5, rely=0.5, anchor="center")
         # Плашка поверх таблицы движется вслед за захваченной строкой.
         self.drag_preview = tk.Frame(self.tree, background="#9aacc3")
@@ -150,7 +148,7 @@ class VideoListMixin:
             font=("TkDefaultFont", 10, "bold"), padx=15, pady=8,
         )
         self.drag_preview_label.grid(row=0, column=0, padx=(0, 4), pady=(0, 4))
-        for widget in (self.tree, self.empty_hint):
+        for widget in (self.tree, self.empty_hint, self.empty_title, self.empty_subtitle):
             widget.drop_target_register(DND_FILES)
             widget.dnd_bind("<<DropEnter>>", self.enter_file_drop)
             widget.dnd_bind("<<DropPosition>>", self.enter_file_drop)
@@ -163,7 +161,7 @@ class VideoListMixin:
         self.selected_duration = tk.StringVar(value="Общий хронометраж выбранных видео: 00:00:00")
         summary = ttk.Frame(table)
         summary.grid(
-            row=2, column=0, columnspan=2, sticky="ew", pady=(7, 0))
+            row=1, column=0, columnspan=2, sticky="ew", pady=(9, 0))
         summary.columnconfigure(4, weight=1)
         ttk.Label(summary, textvariable=self.selected_duration).grid(row=0, column=0)
         ttk.Label(summary, text="  ·  ").grid(row=0, column=1)
@@ -173,20 +171,55 @@ class VideoListMixin:
         self.output_path_var = tk.StringVar(value="Итоговый файл: ещё не выбран")
         self.output_label = ttk.Label(summary, textvariable=self.output_path_var, width=1)
         self.output_label.grid(row=0, column=4, sticky="ew")
+        self.apply_table_theme()
+
+    def apply_table_theme(self) -> None:
+        """Обновить Tk Canvas и Treeview при переключении палитры."""
+        c = self.colors
+        self.drop_surface.configure(background=c["border"])
+        self.empty_hint.configure(background=c["panel"])
+        self.empty_title.configure(background=c["panel"], foreground=c["text"])
+        self.empty_subtitle.configure(background=c["panel"], foreground=c["muted"])
+        self.drag_preview.configure(background=c["border"])
+        self.drag_preview_label.configure(background=c["panel"], foreground=c["text"])
+        for tag, background in (
+            ("stripe", c["stripe"]),
+            ("drop_target", c["drop_target"]),
+            ("drop_gap", c["drop_gap"]),
+            ("arrive", c["arrive"]),
+            ("drag_source", c["drag_source"]),
+            ("remove_press", c["remove_press"]),
+            ("remove_fade", c["remove_fade"]),
+        ):
+            self.tree.tag_configure(tag, background=background, foreground=c["text"])
+        self.tree.tag_configure("drop_gap", font=("Segoe UI", 10, "bold"))
+        self.tree.tag_configure("remove_press", font=("Segoe UI", 10, "bold"))
+        self.heading_icon.configure(background=c["header"])
+        self.clear_icon.configure(background=c["header"])
+        draw_bootstrap_icon(
+            self.heading_icon,
+            "checked" if self.items and len(self.included_rows) == len(self.items) else "empty",
+            c["muted"])
+        draw_bootstrap_icon(self.clear_icon, "remove", c["error"])
+        self.schedule_icon_refresh()
 
     def enter_file_drop(self, _event: tk.Event) -> str:
         """Подсветить область приёма и запустить мягкое мерцание её рамки."""
         if self.busy:
             return "none"
         self.drop_hint.set("↓  Отпустите файлы — добавим видео в конец списка")
-        self.empty_hint.configure(text="↓  Отпустите файлы здесь", background="#e8f3ff")
+        self.empty_title.configure(text="↓  Отпустите файлы здесь")
+        self.empty_hint.configure(background=self.colors["selection"])
+        self.empty_title.configure(background=self.colors["selection"])
+        self.empty_subtitle.configure(background=self.colors["selection"])
         if self.drop_pulse_job is None:
             self.pulse_drop_surface(True)
         return COPY
 
     def pulse_drop_surface(self, bright: bool) -> None:
         """Чередовать цвета рамки, пока файлы удерживаются над таблицей."""
-        self.drop_surface.configure(background="#388be0" if bright else "#a6d4ff")
+        self.drop_surface.configure(
+            background=self.colors["accent"] if bright else self.colors["drop_active"])
         self.drop_pulse_job = self.after(280, self.pulse_drop_surface, not bright)
 
     def leave_file_drop(self, _event: tk.Event | None = None) -> None:
@@ -194,11 +227,12 @@ class VideoListMixin:
         if self.drop_pulse_job is not None:
             self.after_cancel(self.drop_pulse_job)
             self.drop_pulse_job = None
-        self.drop_surface.configure(background="#d7dfe9")
-        self.drop_hint.set("↓  Перетащите сюда видео из Проводника  ·  тяните строки для изменения порядка")
-        self.empty_hint.configure(text="＋  Добавьте видеоролики\n\n"
-                                  "Перетащите файлы сюда или добавьте видео кнопкой выше",
-                                  background="#f8fbff")
+        self.drop_surface.configure(background=self.colors["border"])
+        self.drop_hint.set("")
+        self.empty_title.configure(text="▶  Перетащите сюда видео из Проводника")
+        self.empty_hint.configure(background=self.colors["panel"])
+        self.empty_title.configure(background=self.colors["panel"])
+        self.empty_subtitle.configure(background=self.colors["panel"])
 
     def refresh_row_colors(self) -> None:
         """Обновить чередование строк после добавления или перестановки."""
@@ -220,14 +254,17 @@ class VideoListMixin:
     def icon_background(self, row: str) -> str:
         """Подобрать фон значка под цвет подсветки строки."""
         tags = self.tree.item(row, "tags")
-        for tag, color in (("remove_press", "#ffcad3"), ("remove_fade", "#fbe9ec"),
-                           ("drag_source", "#e4eaf2"), ("drop_target", "#c6e2ff"),
-                           ("arrive", "#c9f2da"), ("stripe", "#f1f5fa")):
+        for tag, color in (("remove_press", self.colors["remove_press"]),
+                           ("remove_fade", self.colors["remove_fade"]),
+                           ("drag_source", self.colors["drag_source"]),
+                           ("drop_target", self.colors["drop_target"]),
+                           ("arrive", self.colors["arrive"]),
+                           ("stripe", self.colors["stripe"])):
             if tag in tags:
                 return color
         if row in self.tree.selection():
-            return "#0078d7" if sys.platform == "win32" else "#4a83ba"
-        return "#ffffff"
+            return self.colors["selection"]
+        return self.colors["panel"]
 
     def make_row_icon(self, row: str, column: str) -> tk.Canvas:
         """Создать накладной значок с прежним поведением ячейки таблицы."""
@@ -281,7 +318,7 @@ class VideoListMixin:
                     icon.configure(background=background)
                 kind = (("checked" if row in self.included_rows else "empty") if column == "include"
                         else "remove")
-                color = "#be2437" if column == "remove" else "#375c83"
+                color = self.colors["error"] if column == "remove" else self.colors["muted"]
                 draw_bootstrap_icon(icon, kind, color)
                 icon.place(x=x + (width - ICON_SIZE) // 2,
                            y=y + (height - ICON_SIZE) // 2)
@@ -577,7 +614,8 @@ class VideoListMixin:
     def update_include_heading(self) -> None:
         """Показывать общий флажок, когда отмечены все строки таблицы."""
         checked = bool(self.items) and len(self.included_rows) == len(self.items)
-        draw_bootstrap_icon(self.heading_icon, "checked" if checked else "empty", "#375c83")
+        draw_bootstrap_icon(self.heading_icon, "checked" if checked else "empty",
+                            self.colors["muted"])
 
     def toggle_row(self, row: str) -> None:
         """Переключить участие файла в склейке, сохранив его в таблице."""
@@ -620,7 +658,7 @@ class VideoListMixin:
     def start_scan(self, ffmpeg: str, paths: list[Path]) -> None:
         """Запустить чтение длительностей в фоне, настроив прогресс по файлам."""
         self.prepare_progress(1)
-        self.progress_label_var.set("Добавление файлов")
+        self.progress_label_var.set(f"Чтение видео: 0 из {len(paths)}")
         self.progress.configure(mode="determinate", maximum=len(paths), value=0)
         self.set_busy(True)
         self.status.set(f"Чтение длительности: 0 из {len(paths)}")
@@ -685,6 +723,7 @@ class VideoListMixin:
         # Краткий цветовой переход помогает заметить каждую поступившую строку.
         self.schedule_row_arrival(row)
         self.progress.configure(value=index)
+        self.progress_label_var.set(f"Чтение видео: {index} из {total}")
         self.status.set(f"Чтение длительности: {index} из {total}")
 
     def finish_row_arrival(self, row: str) -> None:
@@ -710,4 +749,5 @@ class VideoListMixin:
         """Разблокировать настройки после чтения списка роликов."""
         self.set_busy(False)
         self.update_videos()
+        self.progress_label_var.set(f"Готово к склейке: {len(self.videos)} видео")
         self.status.set(f"Готово к склейке: {len(self.videos)} видео (по порядку в таблице)")

@@ -31,8 +31,9 @@ class AppSettings:
     crop_black_border: bool = False
     remove_stabilization_reflection: bool = False
     use_gpu: bool = True
-    width: int = 920
-    height: int = 600
+    theme: str = "Системная"
+    width: int = 1050
+    height: int = 700
     x: int | None = None
     y: int | None = None
     settings_version: int = SETTINGS_VERSION
@@ -140,6 +141,8 @@ def load_settings(path: Path | None = None) -> AppSettings:
         settings.resolution = data["resolution"]
     if data.get("deinterlace") in ("Авто", "Принудительно", "Выключено"):
         settings.deinterlace = data["deinterlace"]
+    if data.get("theme") in ("Светлая", "Тёмная", "Системная"):
+        settings.theme = data["theme"]
     if data.get("stabilization") in ("Выключен", "Слабый", "Средний", "Сильный"):
         settings.stabilization = data["stabilization"]
     # Старые конфиги один раз включают сжатие; после сохранения версия

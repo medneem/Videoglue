@@ -48,14 +48,13 @@ class VideoListTests(unittest.TestCase):
                     self.assertIn("23.8", app.estimated_size_var.get())
                     launch.assert_not_called()
                 app.prepare_progress(len(app.videos))
-                self.assertFalse(app.overall_progress.winfo_manager())
+                self.assertEqual(app.progress["value"], 0)
                 app.toggle_all_rows()
                 app.prepare_progress(len(app.videos))
-                self.assertEqual(app.overall_progress.winfo_manager(), "grid")
                 app.events.put(("stage_progress", ("Перекодирование", 2, 2, 20, 60, "b.mp4")))
                 app.poll_events()
-                self.assertEqual(app.progress["value"], 20)
-                self.assertEqual(app.overall_progress["value"], 60)
+                self.assertEqual(app.progress["value"], 60)
+                self.assertIn("Всего 60%", app.progress_label_var.get())
                 app.set_busy(True)
                 app.clear_files()
                 self.assertEqual(len(app.items), 2)
@@ -67,6 +66,24 @@ class VideoListTests(unittest.TestCase):
                 self.assertFalse(app.arrival_jobs)
                 self.assertFalse(app.removal_jobs)
                 self.assertTrue(all(path.exists() for path in sources))
+            finally:
+                app.close()
+
+    def test_theme_switch_keeps_drop_zone_and_saves_preference(self) -> None:
+        """Два оформления меняются без пересоздания окна или списка."""
+        with tempfile.TemporaryDirectory() as directory, \
+                patch.object(settings, "config_path", return_value=Path(directory) / "config.jsonc"):
+            app = VideoGlue()
+            try:
+                self.assertEqual(app.empty_hint.winfo_manager(), "place")
+                app.theme_var.set("Тёмная")
+                self.assertEqual(app.colors["panel"], "#202a38")
+                self.assertEqual(app.empty_hint.cget("background"), app.colors["panel"])
+                self.assertTrue(app.tree.winfo_exists())
+                app.persist_settings()
+                self.assertEqual(settings.load_settings().theme, "Тёмная")
+                app.theme_var.set("Светлая")
+                self.assertEqual(app.colors["panel"], "#ffffff")
             finally:
                 app.close()
 
@@ -215,7 +232,7 @@ class VideoListTests(unittest.TestCase):
                 unsupported = folder / "notes.txt"
                 for path in (first, second, third, unsupported):
                     path.touch()
-                self.assertEqual(app.choose_button.cget("text"), "Добавить видео")
+                self.assertEqual(app.choose_button.cget("text"), "＋  Добавить видео")
                 with patch.object(video_list, "probe_media", return_value=media_ffmpeg.MediaInfo(duration=3.0)), \
                         patch.object(video_list.filedialog, "askopenfilenames",
                                      side_effect=[(str(first),), (str(first), str(second), str(unsupported), str(third)),
@@ -273,9 +290,11 @@ class VideoListTests(unittest.TestCase):
                 self.assertEqual(app.selected_duration.get(), "Общий хронометраж выбранных видео: 00:00:04")
                 self.assertEqual(app.tree.set(rows[2], "duration"), "Ошибка чтения")
                 app.update()
+                # В новой теме заголовок выше: координату берём внутри строки.
+                row_y = app.tree.bbox(rows[0], "name")[1] + 5
                 with patch.object(app.tree, "identify_column", return_value="#1"), \
                         patch.object(app.tree, "identify_row", return_value=rows[0]):
-                    app.start_row_drag(SimpleNamespace(x=20, y=30))
+                    app.start_row_drag(SimpleNamespace(x=20, y=row_y))
                 self.assertEqual(app.videos, [second])
                 self.assertEqual(app.selected_duration.get(), "Общий хронометраж выбранных видео: 00:00:02")
                 self.assertNotIn(rows[0], app.included_rows)
@@ -474,8 +493,10 @@ class SettingsTests(unittest.TestCase):
             self.assertEqual(json.loads(settings.strip_jsonc(path.read_text(encoding="utf-8")))["format"], "MKV")
 
             loaded.quality = "Малое"
+            loaded.theme = "Тёмная"
             settings.save_settings(loaded, path)
             self.assertEqual(settings.load_settings(path).quality, "Малое")
+            self.assertEqual(settings.load_settings(path).theme, "Тёмная")
 
             path.write_text('{"width": 1, "compress": "yes", "stabilization": "bad", "frame_rate": "100"}', encoding="utf-8")
             self.assertEqual(settings.load_settings(path), settings.AppSettings())
