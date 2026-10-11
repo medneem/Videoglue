@@ -14,6 +14,7 @@ from typing import cast
 from tkinterdnd2 import TkinterDnD
 
 from ffmpeg import ffmpeg_path, nvenc_available
+from version import APP_VERSION
 from merge import QUALITY_BITRATE, MergeWorker, estimate_output_size
 from settings import AUDIO_QUALITIES, FRAME_RATES, RESOLUTIONS, AppSettings, config_path, load_settings, save_settings
 from video_list import VideoListMixin
@@ -36,7 +37,7 @@ class VideoGlue(VideoListMixin, TkinterDnD.Tk):
         self.save_job: str | None = None
         self.poll_job: str | None = None
         self.estimate_job: str | None = None
-        self.title("Склейка видео")
+        self.title(f"Videoglue {APP_VERSION} — Склейка видео")
         geometry = f"{self.saved_settings.width}x{self.saved_settings.height}"
         if self.saved_settings.x is not None and self.saved_settings.y is not None:
             geometry += f"{self.saved_settings.x:+d}{self.saved_settings.y:+d}"

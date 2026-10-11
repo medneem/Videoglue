@@ -159,18 +159,19 @@ def probe_media(ffmpeg: str, path: Path, *, stopping: threading.Event | None = N
 
 
 def ffmpeg_path() -> str:
-    """Найти FFmpeg рядом с исходниками или внутри распакованного EXE.
-
-    При сборке PyInstaller путь __file__ указывает внутрь временного каталога
-    распаковки, где вместе с модулями находится вложенный ffmpeg.exe.
-    """
-    local = Path(__file__).resolve().parent / "ffmpeg.exe"
-    if sys.platform == "win32" and local.is_file():
+    """Prefer ffmpeg.exe beside Videoglue.exe, not the PyInstaller temp directory."""
+    folder = (Path(sys.executable).resolve().parent if getattr(sys, "frozen", False)
+              else Path(__file__).resolve().parent)
+    local = folder / ("ffmpeg.exe" if sys.platform == "win32" else "ffmpeg")
+    if local.is_file():
         return str(local)
     installed = shutil.which("ffmpeg")
     if installed:
         return installed
-    raise FileNotFoundError("FFmpeg не найден. Положите ffmpeg.exe рядом с main.py или установите ffmpeg.")
+    raise FileNotFoundError(
+        "FFmpeg не найден. Поместите ffmpeg.exe рядом с Videoglue.exe "
+        "или установите ffmpeg в PATH."
+    )
 
 
 def duration_from_output(output: str) -> float | None:
@@ -219,7 +220,7 @@ def probe_frame_rate(ffmpeg: str, path: Path) -> str | None:
 def probe_video_bitrate(ffmpeg: str, path: Path, duration: float) -> int:
     """Узнать средний битрейт видеопотока; при отсутствии метаданных оценить по файлу.
 
-    Отдельный ffprobe не требуется: дистрибутив приложения включает только FFmpeg.
+    Для чтения метаданных используется FFmpeg, а FFprobe поставляется отдельно.
     Оценка по размеру учитывает аудиобитрейт; при неизвестном звуке резерв
     ограничен, чтобы не поглотить весь бюджет небольшого файла.
     """

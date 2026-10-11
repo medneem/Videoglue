@@ -1,10 +1,13 @@
 # -*- mode: python ; coding: utf-8 -*-
+from pathlib import Path
+
+version_resource = Path('windows_version_info.txt')
 
 
 a = Analysis(
     ['main.py'],
     pathex=[],
-    binaries=[('ffmpeg.exe', '.')],
+    binaries=[],
     datas=[],
     hiddenimports=[],
     hookspath=['.'],
@@ -30,6 +33,7 @@ exe = EXE(
     upx_exclude=[],
     runtime_tmpdir=None,
     console=False,
+    version=str(version_resource) if version_resource.is_file() else None,
     disable_windowed_traceback=False,
     argv_emulation=False,
     target_arch=None,

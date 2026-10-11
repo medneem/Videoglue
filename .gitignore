@@ -31,3 +31,11 @@ coverage.xml
 .DS_Store
 Thumbs.db
 Desktop.ini
+
+# Portable build
+/ffmpeg.exe
+/ffprobe.exe
+/tools/
+/release/
+/Videoglue-v*-windows-x64.zip
+/windows_version_info.txt
