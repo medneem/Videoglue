@@ -19,6 +19,7 @@ from merge import QUALITY_BITRATE, MergeWorker, estimate_output_size
 from settings import AUDIO_QUALITIES, FRAME_RATES, RESOLUTIONS, AppSettings, config_path, load_settings, save_settings
 from video_list import VideoListMixin
 from debug_log import journal
+from ui_theme import THEMES, apply_theme
 
 
 class VideoGlue(VideoListMixin, TkinterDnD.Tk):
@@ -42,7 +43,7 @@ class VideoGlue(VideoListMixin, TkinterDnD.Tk):
         if self.saved_settings.x is not None and self.saved_settings.y is not None:
             geometry += f"{self.saved_settings.x:+d}{self.saved_settings.y:+d}"
         self.geometry(geometry)
-        self.minsize(850, 520)
+        self.minsize(850, 560)
         # Только главный поток обновляет Tk. Сканирование и склейка помещают
         # результаты в очередь, а stopping завершает их при закрытии окна.
         self.events: queue.SimpleQueue[tuple[str, object]] = queue.SimpleQueue()
@@ -58,14 +59,16 @@ class VideoGlue(VideoListMixin, TkinterDnD.Tk):
         self.gpu_fallback_reason: str | None = None
         self.output_path: Path | None = None
 
+        self.theme_var = tk.StringVar(value=self.saved_settings.theme)
+        self.colors = apply_theme(self, self.theme_var.get())
         self.columnconfigure(0, weight=1)
         self.rowconfigure(1, weight=1)
         self.init_video_list()
+        self.theme_var.trace_add("write", self.on_theme_changed)
 
-        # Галочки расположены над двумя группами: параметры видео/аудио слева,
-        # обработка изображения справа. Без «Сжать» фильтры недоступны.
-        settings = ttk.Frame(self, padding=(12, 8))
-        settings.grid(row=2, column=0, sticky="ew", padx=12, pady=(10, 0))
+        # Оба набора параметров видны сразу; общие флажки находятся под ними.
+        settings = ttk.Frame(self, padding=(10, 8))
+        settings.grid(row=2, column=0, sticky="ew", padx=12, pady=(8, 0))
         settings.columnconfigure(0, weight=1)
         settings.columnconfigure(1, weight=1)
         self.format_var = tk.StringVar(value=self.saved_settings.format)
@@ -79,41 +82,43 @@ class VideoGlue(VideoListMixin, TkinterDnD.Tk):
         self.crop_black_border_var = tk.BooleanVar(value=self.saved_settings.crop_black_border)
         self.remove_reflection_var = tk.BooleanVar(value=self.saved_settings.remove_stabilization_reflection)
         self.gpu_var = tk.BooleanVar(value=False)
-        flags = ttk.Frame(settings)
-        flags.grid(row=0, column=0, columnspan=2, sticky="w", pady=(0, 8))
-        self.compress_check = ttk.Checkbutton(flags, text="Сжать", variable=self.compress_var)
-        self.compress_check.grid(row=0, column=0, padx=(0, 20))
-        self.gpu_check = ttk.Checkbutton(flags, text="Использовать NVIDIA (NVENC)",
-                                         variable=self.gpu_var, state="disabled")
-        self.gpu_check.grid(row=0, column=1)
-        encoding = ttk.LabelFrame(settings, text="Настройки перекодирования", padding=(10, 8))
+        ttk.Label(settings, text="Параметры обработки", style="Section.TLabel").grid(
+            row=0, column=0, sticky="w", pady=(0, 8))
+        theme_controls = ttk.Frame(settings)
+        theme_controls.grid(row=0, column=1, sticky="e", pady=(0, 8))
+        ttk.Label(theme_controls, text="Тема:").grid(row=0, column=0, padx=(0, 8))
+        self.theme_box = ttk.Combobox(
+            theme_controls, textvariable=self.theme_var, values=THEMES,
+            state="readonly", width=13)
+        self.theme_box.grid(row=0, column=1)
+        encoding = ttk.LabelFrame(settings, text="Основные настройки", padding=(12, 12))
         encoding.grid(row=1, column=0, sticky="nsew", padx=(0, 6))
         encoding.columnconfigure(1, weight=1)
-        features = ttk.LabelFrame(settings, text="Фичи", padding=(10, 8))
+        features = ttk.LabelFrame(settings, text="Улучшения", padding=(12, 12))
         features.grid(row=1, column=1, sticky="nsew", padx=(6, 0))
         features.columnconfigure(1, weight=1)
 
-        ttk.Label(encoding, text="Формат:").grid(row=0, column=0, sticky="w", padx=(0, 8))
+        ttk.Label(encoding, style="Card.TLabel", text="Формат:").grid(row=0, column=0, sticky="w", padx=(0, 8))
         self.format_box = ttk.Combobox(encoding, textvariable=self.format_var,
                                        values=("MP4", "MKV"), state="readonly", width=19)
         self.format_box.grid(row=0, column=1, sticky="ew")
-        ttk.Label(encoding, text="Качество видео:").grid(row=1, column=0, sticky="w", pady=(8, 0), padx=(0, 8))
+        ttk.Label(encoding, style="Card.TLabel", text="Качество видео:").grid(row=1, column=0, sticky="w", pady=(8, 0), padx=(0, 8))
         self.quality_box = ttk.Combobox(encoding, textvariable=self.quality_var,
                                          values=tuple(QUALITY_BITRATE),
                                         state="readonly" if self.compress_var.get() else "disabled", width=19)
         self.quality_box.grid(row=1, column=1, sticky="ew", pady=(8, 0))
-        ttk.Label(encoding, text="Частота кадров:").grid(row=2, column=0, sticky="w", pady=(8, 0), padx=(0, 8))
+        ttk.Label(encoding, style="Card.TLabel", text="Частота кадров:").grid(row=2, column=0, sticky="w", pady=(8, 0), padx=(0, 8))
         self.frame_rate_box = ttk.Combobox(encoding, textvariable=self.frame_rate_var,
                                             values=FRAME_RATES,
                                            state="readonly" if self.compress_var.get() else "disabled", width=19)
         self.frame_rate_box.grid(row=2, column=1, sticky="ew", pady=(8, 0))
-        ttk.Label(encoding, text="Качество аудио:").grid(row=3, column=0, sticky="w", pady=(8, 0), padx=(0, 8))
+        ttk.Label(encoding, style="Card.TLabel", text="Качество аудио:").grid(row=3, column=0, sticky="w", pady=(8, 0), padx=(0, 8))
         self.audio_quality_box = ttk.Combobox(
             encoding, textvariable=self.audio_quality_var, values=AUDIO_QUALITIES,
             state="readonly" if self.compress_var.get() else "disabled", width=19)
         self.audio_quality_box.grid(row=3, column=1, sticky="ew", pady=(8, 0))
         # Авто анализирует реальные кадры: метка progressive бывает ошибочной.
-        ttk.Label(features, text="Устранение горизонтальных линий:").grid(
+        ttk.Label(features, style="Card.TLabel", text="Устранение горизонтальных линий:").grid(
             row=0, column=0, sticky="w", padx=(0, 8))
         self.deinterlace_box = ttk.Combobox(
             features, textvariable=self.deinterlace_var,
@@ -122,7 +127,7 @@ class VideoGlue(VideoListMixin, TkinterDnD.Tk):
         self.deinterlace_box.grid(row=0, column=1, sticky="ew")
         # Стабилизация требует перекодирования, поэтому без «Сжать» сохраняем
         # выбор, но не разрешаем его использовать.
-        ttk.Label(features, text="Программный стабилизатор:").grid(
+        ttk.Label(features, style="Card.TLabel", text="Программный стабилизатор:").grid(
             row=1, column=0, sticky="w", pady=(8, 0), padx=(0, 8))
         self.stabilization_box = ttk.Combobox(
             features, textvariable=self.stabilization_var,
@@ -130,12 +135,14 @@ class VideoGlue(VideoListMixin, TkinterDnD.Tk):
             state="readonly" if self.compress_var.get() else "disabled", width=15)
         self.stabilization_box.grid(row=1, column=1, sticky="ew", pady=(8, 0))
         self.crop_border_check = ttk.Checkbutton(
-            features, text="Обрезать чёрную кромку", variable=self.crop_black_border_var)
+            features, text="Обрезать чёрную кромку", variable=self.crop_black_border_var,
+            style="Card.TCheckbutton")
         self.crop_border_check.grid(row=2, column=0, columnspan=2, sticky="w", pady=(8, 0))
         self.remove_reflection_check = ttk.Checkbutton(
-            features, text="Убрать отражение стабилизации", variable=self.remove_reflection_var)
+            features, text="Убрать отражение стабилизации", variable=self.remove_reflection_var,
+            style="Card.TCheckbutton")
         self.remove_reflection_check.grid(row=3, column=0, columnspan=2, sticky="w", pady=(8, 0))
-        ttk.Label(encoding, text="Разрешение:").grid(
+        ttk.Label(encoding, style="Card.TLabel", text="Разрешение:").grid(
             row=4, column=0, sticky="w", pady=(8, 0), padx=(0, 8))
         self.resolution_box = ttk.Combobox(
             encoding, textvariable=self.resolution_var, values=RESOLUTIONS,
@@ -155,31 +162,36 @@ class VideoGlue(VideoListMixin, TkinterDnD.Tk):
             setting.trace_add("write", self.schedule_estimate)
         self.refresh_frame_rate_options()
 
-        bottom = ttk.Frame(self, padding=12)
-        bottom.grid(row=3, column=0, sticky="ew")
+        flags = ttk.Frame(self, padding=(18, 3, 12, 0))
+        flags.grid(row=3, column=0, sticky="w")
+        self.compress_check = ttk.Checkbutton(
+            flags, text="Сжать итоговый файл", variable=self.compress_var)
+        self.compress_check.grid(row=0, column=0, padx=(0, 20))
+        self.gpu_check = ttk.Checkbutton(
+            flags, text="Использовать NVIDIA (NVENC)",
+            variable=self.gpu_var, state="disabled")
+        self.gpu_check.grid(row=0, column=1)
+
+        bottom = ttk.Frame(self, padding=(18, 8, 18, 16))
+        bottom.grid(row=4, column=0, sticky="ew")
         bottom.columnconfigure(0, weight=1)
         self.status = tk.StringVar(value="Добавьте один или несколько видеофайлов")
-        self.progress = ttk.Progressbar(bottom, mode="determinate", value=0)
         self.progress_label_var = tk.StringVar(value="Текущий этап")
-        ttk.Label(bottom, textvariable=self.progress_label_var).grid(row=2, column=0, columnspan=2, sticky="w", pady=(8, 0))
-        self.progress.grid(row=3, column=0, columnspan=2, sticky="ew")
-        self.overall_label_var = tk.StringVar(value="Общий прогресс")
-        self.overall_label = ttk.Label(bottom, textvariable=self.overall_label_var)
-        self.overall_label.grid(row=4, column=0, columnspan=2, sticky="w", pady=(6, 0))
-        self.overall_progress = ttk.Progressbar(bottom, mode="determinate", maximum=100)
-        self.overall_progress.grid(row=5, column=0, columnspan=2, sticky="ew")
+        ttk.Label(bottom, textvariable=self.progress_label_var,
+                  style="Muted.TLabel").grid(row=0, column=0, sticky="w", pady=(0, 7))
+        self.progress = ttk.Progressbar(bottom, mode="determinate", maximum=100, value=0)
+        self.progress.grid(row=1, column=0, sticky="ew")
         self.prepare_progress(1)
-        # Общая панель действий находится под обеими шкалами прогресса.
+
         actions = ttk.Frame(bottom)
-        actions.grid(row=6, column=0, columnspan=2, sticky="e", pady=(12, 0))
+        actions.grid(row=0, column=1, rowspan=2, sticky="e", padx=(18, 0))
         self.output_button = ttk.Button(
-            actions, text="Открыть папку результата", command=self.open_output_folder,
-            state="disabled", padding=(12, 6),
-        )
+            actions, text="Открыть папку", command=self.open_output_folder,
+            state="disabled", padding=(12, 8))
         self.output_button.grid(row=0, column=0, padx=(0, 10))
         self.merge_button = ttk.Button(
-            actions, text="Склеить", command=self.merge, state="disabled", padding=(20, 6),
-        )
+            actions, text="▶  Склеить видео", command=self.merge,
+            state="disabled", style="Primary.TButton")
         self.merge_button.grid(row=0, column=1)
 
         self.protocol("WM_DELETE_WINDOW", self.close)
@@ -190,6 +202,20 @@ class VideoGlue(VideoListMixin, TkinterDnD.Tk):
         if not config_path().exists():
             self.persist_settings()
         threading.Thread(target=self.check_gpu, daemon=True).start()
+
+    def on_theme_changed(self, *_args: object) -> None:
+        """Сменить палитру на лету, сохраняя предпочтение в config.jsonc."""
+        self.colors = apply_theme(self, self.theme_var.get())
+        self.apply_table_theme()
+        self.schedule_save()
+
+    def show_about(self) -> None:
+        """Краткая информация без отдельного окна параметров."""
+        messagebox.showinfo(
+            "О Videoglue",
+            f"Videoglue {APP_VERSION} — Склейка видео\\n"
+            "Добавляйте ролики, меняйте порядок и создавайте один видеофайл.",
+            parent=self)
 
     def check_gpu(self) -> None:
         """Проверить NVENC в фоне и передать результат главному потоку."""
@@ -207,11 +233,8 @@ class VideoGlue(VideoListMixin, TkinterDnD.Tk):
         messagebox.showerror("Ошибка интерфейса", "Не удалось выполнить действие.\n\n" + journal.notice(), parent=self)
 
     def prepare_progress(self, count: int) -> None:
-        """Показывать общий прогресс только при обработке нескольких файлов."""
-        self.progress.configure(maximum=100, value=0)
-        self.overall_progress.configure(value=0)
-        for widget in (self.overall_label, self.overall_progress):
-            widget.grid() if count > 1 else widget.grid_remove()
+        """Сбросить единственную шкалу; число роликов не меняет интерфейс."""
+        self.progress.configure(mode="determinate", maximum=100, value=0)
 
     def schedule_estimate(self, *_args: object) -> None:
         """Сгруппировать изменения настроек и списка для быстрого расчёта размера."""
@@ -245,14 +268,13 @@ class VideoGlue(VideoListMixin, TkinterDnD.Tk):
         self.estimated_size_var.set(f"Примерный размер: ≈ {size / divider:.1f} {unit}")
 
     def show_stage_progress(self, data: object) -> None:
-        """Отобразить позицию текущего ролика и всего этапа."""
+        """Показывать общий процент этапа, а ролик — в текстовой подписи."""
         stage, index, count, local, overall, name = data
-        self.progress.configure(maximum=100, value=local)
-        self.overall_progress.configure(value=overall)
-        self.progress_label_var.set(f"{stage}: ролик {index} из {count} — {name} ({local}%)")
+        self.progress.configure(maximum=100, value=overall)
+        self.progress_label_var.set(
+            f"{stage}: ролик {index} из {count} — {name} ({local}%) · Всего {overall}%")
         if self.processing_mode and stage == "Перекодирование":
             self.progress_label_var.set(self.progress_label_var.get() + f" · {self.processing_mode}")
-        self.overall_label_var.set(f"Общий прогресс: {stage.lower()} — {overall}%")
 
     def on_compress_changed(self, *_args: object) -> None:
         """Включить настройки перекодирования только вместе со сжатием."""
@@ -318,6 +340,7 @@ class VideoGlue(VideoListMixin, TkinterDnD.Tk):
             crop_black_border=self.crop_black_border_var.get(),
             remove_stabilization_reflection=self.remove_reflection_var.get(),
             use_gpu=self.gpu_preference,
+            theme=self.theme_var.get(),
             width=width, height=height,
             x=self.winfo_x() if mapped else self.saved_settings.x,
             y=self.winfo_y() if mapped else self.saved_settings.y,
@@ -457,19 +480,21 @@ class VideoGlue(VideoListMixin, TkinterDnD.Tk):
                 self.status.set("Разные аудиодорожки будут объединены в AAC 192 кбит/с")
             elif kind == "stabilizing":
                 index, total = cast(tuple[int, int], data)
-                self.progress.configure(value=0)
+                self.progress.configure(value=int((index - 1) * 100 / total))
+                self.progress_label_var.set(f"Анализ стабилизации: ролик {index} из {total}…")
                 self.status.set(f"Анализ стабилизации: ролик {index} из {total}…")
             elif kind == "stabilization_progress":
                 index, total, percent = cast(tuple[int, int, int], data)
-                self.progress.configure(value=percent)
+                overall = min(100, int(((index - 1) + percent / 100) * 100 / total))
+                self.progress.configure(value=overall)
+                self.progress_label_var.set(
+                    f"Анализ стабилизации: ролик {index} из {total} ({percent}%) · Всего {overall}%")
                 self.status.set(f"Анализ стабилизации: ролик {index} из {total}, {percent}%")
             elif kind == "encoding":
                 # Новая попытка начинает заполнять прогресс с нуля.
                 self.last_encoder = str(data)
                 self.progress.configure(value=0)
-                self.overall_progress.configure(value=0)
                 self.progress_label_var.set("Перекодирование: подготовка…")
-                self.overall_label_var.set("Общий прогресс: перекодирование — 0%")
                 if data == "nvenc":
                     self.status.set("Перекодирование на NVIDIA…")
                 else:
@@ -495,14 +520,14 @@ class VideoGlue(VideoListMixin, TkinterDnD.Tk):
                 self.worker.answer_cpu_fallback(allowed)
             elif kind == "merge_progress":
                 label, percent = cast(tuple[str, int], data)
+                self.progress.configure(value=percent)
+                self.progress_label_var.set(f"{label}: {percent}%")
                 self.status.set(f"{label}: {percent}%")
             elif kind == "stage_progress":
                 self.show_stage_progress(data)
             elif kind == "merge_done":
                 self.progress.configure(mode="determinate", maximum=100, value=100)
-                self.overall_progress.configure(value=100)
                 self.progress_label_var.set("Готово — 100%")
-                self.overall_label_var.set("Общий прогресс — 100%")
                 self.set_busy(False)
                 method = {"copy": "без перекодирования", "nvenc": "NVIDIA NVENC",
                           "cpu": "процессор (libx264)"}[self.last_encoder]
@@ -519,6 +544,7 @@ class VideoGlue(VideoListMixin, TkinterDnD.Tk):
                 self.open_output_folder()
             elif kind == "merge_error":
                 self.progress.configure(mode="determinate", value=0)
+                self.progress_label_var.set("Ошибка обработки")
                 self.set_busy(False)
                 self.status.set("Не удалось склеить видео")
                 messagebox.showerror("Не удалось склеить видео", str(data) + "\n\n" + journal.notice(), parent=self)
