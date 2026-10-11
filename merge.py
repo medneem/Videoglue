@@ -241,10 +241,17 @@ def filtered_inputs(manifest: Path, videos: list[Path], field_orders: list[str |
                         "smooth_window_multiplier=0.5:adaptive_crop=0,"
                         "hwdownload,format=yuv420p,setpts=PTS-STARTPTS")
         elif stabilizing:
+            # Ограничиваем коррекцию, чтобы движение объектов и неуверенные
+            # оценки не заставляли весь кадр плыть. Чёрная кромка не содержит
+            # фрагментов предыдущего кадра; статический zoom скрывает её.
+            info = metadata[index] if metadata else None
+            max_shift = max(1, min(500, int(min(info.width, info.height) * 0.02))) if (
+                info and info.width and info.height) else 10
             filters += (f",vidstabtransform=input=stab-{index}.trf:"
                          f"smoothing={STABILIZATION_SMOOTHING[stabilization]}:"
-                           + ("crop=black:optzoom=0:zoom=0:interpol=bilinear" if remove_reflection
-                           else "optzoom=1:interpol=bilinear"))
+                         f"maxshift={max_shift}:maxangle=0.01:optalgo=gauss:crop=black:"
+                         "interpol=bicubic:"
+                         + ("optzoom=0:zoom=0" if remove_reflection else "optzoom=1"))
         if auto_rates and auto_rates[index]:
             filters += f",fps={auto_rates[index]}"
         if output_size:

@@ -1,0 +1,36 @@
+diff --git a/src/localmotion2transform.c b/src/localmotion2transform.c
+--- a/src/localmotion2transform.c
++++ b/src/localmotion2transform.c
+@@ -163,6 +163,18 @@ VSTransform vsMotionsToTransform(VSTransformData* td,
+     if (f) fprintf(f,"0 0 0 0 0 %i\n# no fields\n", t.extra);
+     return t;
+   }
++  // A fixed background must win over independently moving foreground fields.
++  int stationary = 0;
++  int count = vs_vector_size(motions);
++  for(int i=0; i<count; i++){
++    const LocalMotion* lm = LMGet(motions,i);
++    stationary += lm->v.x == 0 && lm->v.y == 0;
++  }
++  if(stationary * 5 >= count * 3){
++    t = null_transform();
++    if(f) fprintf(f,"0 0 0 0 0 0\n# stationary background\n");
++    return t;
++  }
+   VSArray missmatches = vs_array_new(vs_vector_size(motions));
+   VSArray params = vsTransformToArray(&t);
+   double residual;
+@@ -202,8 +214,11 @@ VSTransform vsMotionsToTransform(VSTransformData* td,
+   vs_array_free(result);
+   vs_array_free(missmatches);
+   // check if sufficiently good match was achieved:
+-  if(residual>100){ // test threshold.
+-    t.extra=1;
++  if(!isfinite(residual) || residual>25 ||
++     !isfinite(t.x) || !isfinite(t.y) || !isfinite(t.alpha) ||
++     fabs(t.x)>td->fiSrc.width*0.1 || fabs(t.y)>td->fiSrc.height*0.1 ||
++     fabs(t.alpha)>0.05){
++    t = null_transform();
+   }
+   if(f){
+     fprintf(f,"0 %f %f %f %f %i\n#\t\t\t\t\t %f %i\n", t.x, t.y, t.alpha, t.zoom, t.extra,

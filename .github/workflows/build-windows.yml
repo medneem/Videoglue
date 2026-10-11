@@ -26,7 +26,7 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: .ffmpeg-build/output
-          key: ffmpeg-7.1.5-win64-ubuntu2404-mingw-v1-${{ hashFiles('build_ffmpeg.sh', 'ffmpeg-nvenc-rate.patch') }}
+          key: ffmpeg-7.1.5-win64-ubuntu2404-mingw-v1-${{ hashFiles('build_ffmpeg.sh', '*stabilization.patch', 'ffmpeg-nvenc-rate.patch') }}
 
       - name: Install cross-build dependencies
         if: steps.ffmpeg-cache.outputs.cache-hit != 'true'
@@ -61,7 +61,7 @@ jobs:
             fi
           done
           # Ensure the cached sources are exactly those in this checkout.
-          for source in build_ffmpeg.sh ffmpeg-nvenc-rate.patch; do
+          for source in build_ffmpeg.sh ffmpeg-nvenc-rate.patch ffmpeg-stabilization.patch vidstab-stabilization.patch; do
             expected=$(awk -v source="$source" '$2 ~ ("/" source "$") { print $1 }' .ffmpeg-build/output/sources.txt)
             test "$expected" != ""
             actual=$(sha256sum "$source" | cut -d ' ' -f 1)
@@ -177,12 +177,15 @@ jobs:
           Copy-Item tools/sources.txt "$folder/FFMPEG_SOURCES.txt"
           Copy-Item build_ffmpeg.sh "$folder/FFMPEG_BUILD.sh"
           Copy-Item ffmpeg-nvenc-rate.patch "$folder/FFMPEG_NVENC.patch"
+          Copy-Item ffmpeg-stabilization.patch $folder
+          Copy-Item vidstab-stabilization.patch $folder
           Copy-Item LICENSE $folder
           Copy-Item THIRD_PARTY_NOTICES.md $folder
           Set-Content "$folder/VERSION.txt" -Value $version -Encoding utf8
           $expected = @("Videoglue.exe","ffmpeg.exe","ffprobe.exe","VERSION.txt",
                         "FFMPEG_VERSION.txt","FFMPEG_SOURCES.txt","FFMPEG_BUILD.sh",
-                        "FFMPEG_NVENC.patch","LICENSE","LICENSE_FFMPEG.txt","THIRD_PARTY_NOTICES.md")
+                        "FFMPEG_NVENC.patch","ffmpeg-stabilization.patch","vidstab-stabilization.patch",
+                        "LICENSE","LICENSE_FFMPEG.txt","THIRD_PARTY_NOTICES.md")
           $actual = @(Get-ChildItem $folder -File)
           if (@(Get-ChildItem $folder -Directory).Count -or $actual.Count -ne $expected.Count) {
             throw "Unexpected staging layout"
@@ -229,6 +232,7 @@ jobs:
               "Videoglue.exe", "ffmpeg.exe", "ffprobe.exe", "VERSION.txt",
               "FFMPEG_VERSION.txt", "FFMPEG_SOURCES.txt", "FFMPEG_BUILD.sh",
               "FFMPEG_NVENC.patch", "LICENSE", "LICENSE_FFMPEG.txt",
+              "ffmpeg-stabilization.patch", "vidstab-stabilization.patch",
               "THIRD_PARTY_NOTICES.md",
           }
           actual = {p.name for p in folder.iterdir()}

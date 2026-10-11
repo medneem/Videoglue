@@ -1,0 +1,145 @@
+diff --git a/libavfilter/vf_deshake_opencl.c b/libavfilter/vf_deshake_opencl.c
+--- a/libavfilter/vf_deshake_opencl.c
++++ b/libavfilter/vf_deshake_opencl.c
+@@ -964,7 +964,7 @@ static void transform_center_scale(
+     ff_get_matrix(
+         0,
+         0,
+-        0,
++        angle,
+         scale_x,
+         scale_y,
+         matrix
+@@ -1476,6 +1476,16 @@ static int filter_frame(AVFilterLink *link, AVFrame *input_frame)
+         );
+     }
+ 
++    // Bound the correction, not the camera path. Never stretch the image to
++    // compensate for an unreliable affine scale estimate.
++    for (int i = RingbufX; i <= RingbufRot; i++) {
++        float limit = i == RingbufRot ? 0.01f :
++                      0.02f * FFMIN(input_frame->width, input_frame->height);
++        new_vals[i] = old_vals[i] + limit * tanhf((new_vals[i] - old_vals[i]) / limit);
++    }
++    new_vals[RingbufScaleX] = old_vals[RingbufScaleX];
++    new_vals[RingbufScaleY] = old_vals[RingbufScaleY];
++
+     transform_center_scale(
+         old_vals[RingbufX] - new_vals[RingbufX],
+         old_vals[RingbufY] - new_vals[RingbufY],
+@@ -1856,32 +1866,29 @@ static int queue_frame(AVFilterLink *link, AVFrame *input_frame)
+ 
+     if (num_vectors < 10) {
+         // Not enough matches to get reliable motion data for this frame
+-        //
+-        // From this point on all data is relative to this frame rather than the
+-        // original frame. We have to make sure that we don't mix values that were
+-        // relative to the original frame with the new values relative to this
+-        // frame when doing the gaussian smoothing. We keep track of where the old
+-        // values end using this data_end_offset field in order to accomplish
+-        // that goal.
+-        //
+-        // If no motion data is present for multiple frames in a short window of
+-        // time, we leave the end where it was to avoid mixing 0s in with the
+-        // old data (and just treat them all as part of the new values)
+-        if (deshake_ctx->abs_motion.data_end_offset == -1) {
+-            deshake_ctx->abs_motion.data_end_offset =
+-                av_fifo_can_read(deshake_ctx->abs_motion.ringbuffers[RingbufX]) - 1;
+-        }
+-
+         goto no_motion_data;
+     }
+ 
++    // A stationary majority is background, not camera motion. Moving UI or
++    // foreground objects must not drag an otherwise fixed frame around.
++    {
++        int stationary = 0;
++        for (int i = 0; i < num_vectors; i++) {
++            PointPair p = deshake_ctx->matches_contig_host[i].p;
++            stationary += hypotf(p.p2.s[0] - p.p1.s[0],
++                                 p.p2.s[1] - p.p1.s[1]) < 0.5f;
++        }
++        if (stationary * 5 >= num_vectors * 3)
++            goto no_motion_data;
++    }
++
+     if (!estimate_affine_2d(
+         deshake_ctx,
+         deshake_ctx->matches_contig_host,
+         &debug_matches,
+         num_vectors,
+         model.matrix,
+-        10.0,
++        2.0,
+         3000,
+         0.999999999999
+     )) {
+@@ -1895,6 +1902,9 @@ static int queue_frame(AVFilterLink *link, AVFrame *input_frame)
+         }
+     }
+ 
++    if (num_inliers < 10 || num_inliers * 5 < num_vectors * 3)
++        goto no_motion_data;
++
+     if (!minimize_error(
+         deshake_ctx,
+         deshake_ctx->inliers,
+@@ -1909,6 +1919,24 @@ static int queue_frame(AVFilterLink *link, AVFrame *input_frame)
+ 
+     relative = decompose_transform(model.matrix);
+ 
++    // The renderer rotates about the frame centre, whereas the fitted matrix
++    // is expressed about the origin. Convert translation to that centre.
++    relative.translation.s[0] += (model.matrix[0] - 1) * input_frame->width / 2 +
++                                model.matrix[1] * input_frame->height / 2;
++    relative.translation.s[1] += model.matrix[3] * input_frame->width / 2 +
++                                (model.matrix[4] - 1) * input_frame->height / 2;
++    if (!isfinite(relative.translation.s[0]) || !isfinite(relative.translation.s[1]) ||
++        !isfinite(relative.rotation) || !isfinite(relative.scale.s[0]) ||
++        !isfinite(relative.scale.s[1]) ||
++        fabsf(relative.translation.s[0]) > input_frame->width * 0.1f ||
++        fabsf(relative.translation.s[1]) > input_frame->height * 0.1f ||
++        fabsf(relative.rotation) > 0.05f ||
++        fabsf(relative.scale.s[0] - 1) > 0.02f ||
++        fabsf(relative.scale.s[1] - 1) > 0.02f ||
++        fabsf(relative.skew.s[0]) > 0.02f)
++        goto no_motion_data;
++    relative.scale.s[0] = relative.scale.s[1] = 1.0f;
++
+     // Get the absolute transform data for the previous frame
+     for (int i = 0; i < RingbufCount; i++) {
+         av_fifo_peek(
+@@ -1943,6 +1971,15 @@ no_motion_data:
+     new_vals[RingbufScaleX] = 1.0f;
+     new_vals[RingbufScaleY] = 1.0f;
+ 
++    // Missing/unreliable measurements mean no new motion. Resetting an
++    // accumulated path to zero makes the smoothing window cross unrelated
++    // coordinate systems and causes violent jumps.
++    if (av_fifo_can_read(deshake_ctx->abs_motion.ringbuffers[RingbufX])) {
++        for (int i = 0; i < RingbufCount; i++)
++            av_fifo_peek(deshake_ctx->abs_motion.ringbuffers[i], &new_vals[i], 1,
++                         av_fifo_can_read(deshake_ctx->abs_motion.ringbuffers[i]) - 1);
++    }
++
+     for (int i = 0; i < num_vectors; i++) {
+         deshake_ctx->matches_contig_host[i].should_consider = 0;
+     }
+@@ -1950,7 +1987,7 @@ no_motion_data:
+ 
+     if (deshake_ctx->debug_on) {
+         av_log(avctx, AV_LOG_VERBOSE,
+-            "\n[ALERT] No motion data found in queue_frame, motion reset to 0\n\n"
++            "\nUnreliable or stationary motion: holding camera path\n\n"
+         );
+     }
+ 
+@@ -2041,7 +2078,7 @@ static int activate(AVFilterContext *ctx)
+                 // See if we have enough buffered frames to process one
+                 //
+                 // "enough" is half the smooth window of queued frames into the future
+-                if (ff_framequeue_queued_frames(&deshake_ctx->fq) >= deshake_ctx->smooth_window / 2) {
++                if (ff_framequeue_queued_frames(&deshake_ctx->fq) >= deshake_ctx->smooth_window / 2 + 1) {
+                     return filter_frame(inlink, ff_framequeue_take(&deshake_ctx->fq));
+                 }
+             }

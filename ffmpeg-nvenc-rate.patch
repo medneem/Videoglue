@@ -32,7 +32,7 @@ diff --git a/libavcodec/nvenc_h264.c b/libavcodec/nvenc_h264.c
      { "vbr_hq",       "Variable bitrate high quality mode", 0,                    AV_OPT_TYPE_CONST, { .i64 = RCD(NV_ENC_PARAMS_RC_VBR) },                  0, 0, VE, .unit = "rc" },
  #endif
 +    { "rc_framerate", "Set rate-control frame rate without modifying timestamps",
-+      OFFSET(rc_framerate), AV_OPT_TYPE_VIDEO_RATE, { .str = "0/1" }, 0, INT_MAX, VE },
++      OFFSET(rc_framerate), AV_OPT_TYPE_RATIONAL, { .dbl = 0 }, 0, INT_MAX, VE },
      { "rc-lookahead", "Number of frames to look ahead for rate-control",
                                                              OFFSET(rc_lookahead), AV_OPT_TYPE_INT,   { .i64 = 0 }, 0, INT_MAX, VE },
      { "surfaces",     "Number of concurrent surfaces",      OFFSET(nb_surfaces),  AV_OPT_TYPE_INT,   { .i64 = 0 }, 0, MAX_REGISTERED_FRAMES, VE },

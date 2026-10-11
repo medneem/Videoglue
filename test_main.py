@@ -1,8 +1,11 @@
 """Ключевые сценарии интерфейса, настроек и склейки FFmpeg."""
 
 import json
+import math
 import queue
+import random
 import shutil
+import statistics
 import subprocess
 import sys
 import tempfile
@@ -811,6 +814,71 @@ class MergeTests(unittest.TestCase):
                     numerator, denominator = map(int, stream["avg_frame_rate"].split("/"))
                     self.assertEqual(int(stream["nb_read_frames"]), 120 * len(clips))
                     self.assertAlmostEqual(numerator / denominator, 60, delta=0.1)
+
+    def test_stabilization_reduces_known_shake_after_buffer_fills(self) -> None:
+        """Измеряем движение картинки, включая середину и хвост OpenCL-буфера."""
+        width, height, margin, count = 640, 360, 16, 90
+        stride = width + 2 * margin
+        rng = random.Random(481)
+        tiles = [[rng.randrange(30, 225) for _ in range((stride + 7) // 8)]
+                 for _ in range((height + 7) // 8)]
+        texture = bytes(tiles[y // 8][x // 8] for y in range(height) for x in range(stride))
+        reference = b"".join(texture[y * stride + margin:y * stride + margin + width]
+                             for y in range(height))
+        points = [y * width + x for y in range(44, height - 40, 24)
+                  for x in range(41, width - 40, 13)]
+        with tempfile.TemporaryDirectory() as directory:
+            folder = Path(directory)
+
+            def run(args: list[str]) -> bytes:
+                result = subprocess.run([self.ffmpeg, "-hide_banner", "-loglevel", "error", "-y", *args],
+                                        cwd=folder, capture_output=True,
+                                        creationflags=media_ffmpeg.NO_WINDOW)
+                self.assertEqual(result.returncode, 0, result.stderr.decode(errors="replace"))
+                return result.stdout
+
+            raw, source = folder / "shaky.gray", folder / "shaky.mp4"
+            with raw.open("wb") as stream:
+                for frame in range(count):
+                    shift = round(4 * math.sin(frame * 1.7))
+                    stream.write(b"".join(texture[y * stride + margin + shift:
+                                                  y * stride + margin + shift + width]
+                                          for y in range(height)))
+            run(["-f", "rawvideo", "-pixel_format", "gray", "-video_size", f"{width}x{height}",
+                 "-framerate", "30", "-i", str(raw), "-vf", "format=yuv420p", "-c:v", "libx264",
+                 "-crf", "10", str(source)])
+
+            def measure(path: Path) -> tuple[float, float]:
+                data = run(["-i", str(path), "-an", "-pix_fmt", "gray", "-fps_mode", "passthrough",
+                            "-f", "rawvideo", "pipe:1"])
+                self.assertEqual(len(data), width * height * count)
+                positions = []
+                for k in range(count):
+                    frame = data[k * width * height:(k + 1) * width * height]
+                    positions.append(min(range(-10, 11), key=lambda dx:
+                                         sum((frame[i + dx] - reference[i]) ** 2 for i in points)))
+                return (statistics.pstdev(positions),
+                        statistics.mean(abs(a - b) for a, b in zip(positions, positions[1:])))
+
+            before = measure(source)
+            run(["-i", str(source), "-vf", "vidstabdetect=result=shaky.trf", "-an", "-f", "null", "-"])
+            for gpu in (False, True):
+                if gpu and not media_ffmpeg.nvenc_available(self.ffmpeg):
+                    continue
+                with self.subTest(gpu=gpu):
+                    output = folder / f"stabilized-{gpu}.mp4"
+                    inputs = merge.filtered_inputs(
+                        folder / "unused.txt", [source], [None], "Сильный",
+                        gpu_stabilization=gpu, frame_rate="30",
+                        metadata=[media_ffmpeg.MediaInfo(width=width, height=height)],
+                        audio_infos=[media_ffmpeg.MediaInfo(has_audio=False)],
+                        remove_reflection=not gpu)
+                    # The application names each clip's analysis file by its index.
+                    shutil.copyfile(folder / "shaky.trf", folder / "stab-0.trf")
+                    run([*inputs, "-an", "-c:v", "h264_nvenc" if gpu else "libx264", str(output)])
+                    after = measure(output)
+                    self.assertLess(after[0], before[0] * 0.75, (before, after))
+                    self.assertLess(after[1], before[1] * 0.75, (before, after))
 
     def test_gpu_stabilization_keeps_both_deinterlaced_fields(self) -> None:
         """Восстановление FPS после OpenCL не выбрасывает половину полей bwdif."""

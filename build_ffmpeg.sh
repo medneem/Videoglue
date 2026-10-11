@@ -28,6 +28,17 @@ clone nvcodec https://github.com/FFmpeg/nv-codec-headers.git n12.2.72.0
 clone opencl-headers https://github.com/KhronosGroup/OpenCL-Headers.git v2024.10.24
 clone opencl-loader https://github.com/KhronosGroup/OpenCL-ICD-Loader.git v2024.10.24
 
+apply_patch_once() {
+    local source=$1 patch=$2
+    test -s "$patch"
+    if ! git -C "$source" apply --reverse --check "$patch" 2>/dev/null; then
+        git -C "$source" apply --check "$patch"
+        git -C "$source" apply "$patch"
+    fi
+}
+apply_patch_once "$ROOT/src/vidstab" "$SCRIPT_DIR/vidstab-stabilization.patch"
+apply_patch_once "$ROOT/src/ffmpeg" "$SCRIPT_DIR/ffmpeg-stabilization.patch"
+
 pushd "$ROOT/src/x264"
 ./configure --host=x86_64-w64-mingw32 --cross-prefix=x86_64-w64-mingw32- \
     --prefix="$PREFIX" --enable-static --disable-cli --disable-opencl
@@ -70,10 +81,10 @@ fi
     --enable-indev=lavfi --enable-gpl --enable-libx264 --enable-libvidstab \
     --enable-opencl --enable-ffnvcodec --enable-nvenc --enable-cuda-llvm \
     --disable-encoders --enable-encoder=libx264,h264_nvenc,aac,mpeg4,dvvideo,flac,pcm_s16le,wrapped_avframe,rawvideo \
-    --disable-muxers --enable-muxer=mp4,mov,matroska,avi,null,framehash \
+    --disable-muxers --enable-muxer=mp4,mov,matroska,avi,null,framehash,rawvideo \
     --disable-protocols --enable-protocol=file,pipe \
     --disable-filters \
-    --enable-filter=bwdif,bwdif_cuda,yadif_cuda,deshake_opencl,vidstabdetect,vidstabtransform,idet,concat,setpts,asetpts,setsar,fps,format,scale,pad,hwupload,hwupload_cuda,hwdownload,null,anull,anullsrc,atrim,apad,aresample,aformat,transpose,hflip,vflip,color,testsrc2,sine,anoisesrc,interlace,setfield,select,showinfo
+    --enable-filter=bwdif,bwdif_cuda,yadif_cuda,deshake_opencl,vidstabdetect,vidstabtransform,idet,concat,setpts,asetpts,setsar,fps,format,scale,pad,crop,hwupload,hwupload_cuda,hwdownload,null,anull,anullsrc,atrim,apad,aresample,aformat,transpose,hflip,vflip,color,testsrc2,sine,anoisesrc,interlace,setfield,select,showinfo
 make -j "$JOBS" ffmpeg.exe ffprobe.exe
 cp ffmpeg.exe "$ROOT/output/ffmpeg.exe"
 cp ffprobe.exe "$ROOT/output/ffprobe.exe"
@@ -82,7 +93,9 @@ cp ffprobe.exe "$ROOT/output/ffprobe.exe"
         printf '%s ' "$name"
         git -C "$ROOT/src/$name" rev-parse HEAD
     done
-    sha256sum "$ROOT/output/ffmpeg.exe" "$ROOT/output/ffprobe.exe" "$PATCH" "$SCRIPT_DIR/build_ffmpeg.sh"
+    sha256sum "$ROOT/output/ffmpeg.exe" "$ROOT/output/ffprobe.exe" "$PATCH" \
+        "$SCRIPT_DIR/ffmpeg-stabilization.patch" "$SCRIPT_DIR/vidstab-stabilization.patch" \
+        "$SCRIPT_DIR/build_ffmpeg.sh"
 } > "$ROOT/output/sources.txt"
 popd
 echo "Built FFmpeg and FFprobe 7.1.5 for Windows x64 in $ROOT/output"
