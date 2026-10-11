@@ -1,8 +1,7 @@
 """Release gate: Videoglue supports only the tested FFmpeg 7.1.5 toolchain.
 
 Exits nonzero when ffmpeg/ffprobe versions or required filters/encoder differ.
-A matching banner alone does not guarantee GPU behavior: CI also requires
-a SHA-256-pinned archive of the previously tested custom build.
+Binaries are built from pinned sources in CI. GPU hardware still requires real-world testing.
 """
 
 from __future__ import annotations
@@ -59,6 +58,10 @@ def validate(ffmpeg: Path, ffprobe: Path) -> str:
     encoders = capture(ffmpeg, "-hide_banner", "-encoders")
     if not re.search(rf"\b{REQUIRED_ENCODER}\b", encoders):
         raise ValueError(f"FFmpeg {REQUIRED_VERSION}: missing {REQUIRED_ENCODER}")
+
+    options = capture(ffmpeg, "-hide_banner", "-h", "encoder=h264_nvenc")
+    if not re.search(r"\brc_framerate\b", options):
+        raise ValueError("FFmpeg missing Videoglue NVENC rc_framerate patch")
 
     return capture(ffmpeg, "-version").splitlines()[0]
 

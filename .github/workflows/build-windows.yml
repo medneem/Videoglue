@@ -13,8 +13,50 @@ permissions:
   contents: read
 
 jobs:
+  ffmpeg-build:
+    name: Build FFmpeg 7.1.5 / FFprobe for Windows x64
+    runs-on: ubuntu-24.04
+    timeout-minutes: 180
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install cross-build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            git build-essential gcc-mingw-w64-x86-64 g++-mingw-w64-x86-64 \
+            binutils-mingw-w64-x86-64 nasm yasm cmake clang llvm pkg-config \
+            autoconf automake libtool python3
+
+      - name: Cross-compile pinned sources and NVENC patch
+        env:
+          JOBS: "4"
+        run: bash build_ffmpeg.sh "$GITHUB_WORKSPACE/.ffmpeg-build"
+
+      - name: Verify cross-compiled tools and provenance
+        run: |
+          set -euo pipefail
+          file .ffmpeg-build/output/ffmpeg.exe | grep -q "PE32+ executable"
+          file .ffmpeg-build/output/ffprobe.exe | grep -q "PE32+ executable"
+          test -s .ffmpeg-build/output/sources.txt
+          grep -q "b35605ace3ddf7c1a5d67a2eb553f034aef41d55" .ffmpeg-build/output/sources.txt
+          sha256sum .ffmpeg-build/output/ffmpeg.exe .ffmpeg-build/output/ffprobe.exe
+
+      - name: Upload FFmpeg 7.1.5 toolchain artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ffmpeg-7.1.5-windows-x64
+          path: |
+            .ffmpeg-build/output/ffmpeg.exe
+            .ffmpeg-build/output/ffprobe.exe
+            .ffmpeg-build/output/sources.txt
+          if-no-files-found: error
+          retention-days: 14
+
   windows-portable:
     name: Windows x64 portable ZIP
+    needs: ffmpeg-build
     runs-on: windows-latest
     timeout-minutes: 75
     steps:
@@ -49,43 +91,25 @@ jobs:
           python -m unittest -v test_release
           if ($LASTEXITCODE -ne 0) { throw "Release unit tests failed" }
 
-      - name: Fetch the pinned FFmpeg 7.1.5 toolchain
+      - name: Download freshly built FFmpeg and FFprobe
+        uses: actions/download-artifact@v4
+        with:
+          name: ffmpeg-7.1.5-windows-x64
+          path: tools
+
+      - name: Check binary versions, features and NVENC patch
         shell: pwsh
-        env:
-          GH_TOKEN: ${{ github.token }}
-          GH_REPO: ${{ github.repository }}
-          FFMPEG_ARCHIVE_SHA256: ${{ vars.FFMPEG_715_SHA256 }}
         run: |
           $ErrorActionPreference = "Stop"
-          # The source must be a tested, immutable pair of ffmpeg.exe + ffprobe.exe.
-          # Never use a floating "latest" FFmpeg download.
-          if ($env:FFMPEG_ARCHIVE_SHA256 -notmatch '^[0-9a-fA-F]{64}$') {
-            throw "Set repository Actions variable FFMPEG_715_SHA256 to the SHA-256 of the tested FFmpeg 7.1.5 ZIP. Do not release with an unverified FFmpeg build."
-          }
-          New-Item -ItemType Directory -Force tools | Out-Null
-          $asset = "ffmpeg-7.1.5-windows-x64.zip"
-          gh release download "ffmpeg-7.1.5-toolchain" --repo "$env:GITHUB_REPOSITORY" --pattern "$asset" --dir tools
-          if ($LASTEXITCODE -ne 0 -or -not (Test-Path "tools/$asset" -PathType Leaf)) {
-            throw "Missing pinned FFmpeg 7.1.5 archive. Upload $asset to the ffmpeg-7.1.5-toolchain GitHub release."
-          }
-          $actual = (Get-FileHash "tools/$asset" -Algorithm SHA256).Hash
-          if ($actual -ine $env:FFMPEG_ARCHIVE_SHA256) { throw "Pinned FFmpeg 7.1.5 archive SHA256 mismatch" }
-          Expand-Archive -LiteralPath "tools/$asset" -DestinationPath "tools/unpacked" -Force
-          $ffmpeg = @(Get-ChildItem tools/unpacked -Recurse -File -Filter ffmpeg.exe)
-          $ffprobe = @(Get-ChildItem tools/unpacked -Recurse -File -Filter ffprobe.exe)
-          if ($ffmpeg.Count -ne 1 -or $ffprobe.Count -ne 1) {
-            throw "Pinned archive must contain exactly one ffmpeg.exe and one ffprobe.exe"
-          }
-          Copy-Item $ffmpeg[0].FullName tools/ffmpeg.exe
-          Copy-Item $ffprobe[0].FullName tools/ffprobe.exe
           python scripts/check_ffmpeg_toolchain.py tools/ffmpeg.exe tools/ffprobe.exe
-          if ($LASTEXITCODE -ne 0) { throw "Wrong FFmpeg version or required stabilization feature missing" }
+          if ($LASTEXITCODE -ne 0) { throw "FFmpeg does not match Videoglue requirements" }
+          if (-not (Test-Path tools/sources.txt -PathType Leaf)) { throw "Missing FFmpeg source manifest" }
           Copy-Item tools/ffmpeg.exe ffmpeg.exe
           Add-Content -Path $env:GITHUB_PATH -Value (Resolve-Path tools).Path
           $version = & tools/ffmpeg.exe -version | Select-Object -First 1
           Set-Content tools/FFMPEG_VERSION.txt -Value $version -Encoding utf8
           Invoke-WebRequest -Uri https://www.gnu.org/licenses/gpl-3.0.txt -OutFile tools/LICENSE_FFMPEG.txt
-          if ((Get-Item tools/LICENSE_FFMPEG.txt).Length -lt 10000) { throw "Missing GPLv3 license text" }
+          if ((Get-Item tools/LICENSE_FFMPEG.txt).Length -lt 10000) { throw "GPLv3 license download failed" }
 
       - name: Run application tests
         shell: pwsh
@@ -118,11 +142,15 @@ jobs:
           Copy-Item tools/ffprobe.exe $folder
           Copy-Item tools/FFMPEG_VERSION.txt $folder
           Copy-Item tools/LICENSE_FFMPEG.txt $folder
+          Copy-Item tools/sources.txt "$folder/FFMPEG_SOURCES.txt"
+          Copy-Item build_ffmpeg.sh "$folder/FFMPEG_BUILD.sh"
+          Copy-Item ffmpeg-nvenc-rate.patch "$folder/FFMPEG_NVENC.patch"
           Copy-Item LICENSE $folder
           Copy-Item THIRD_PARTY_NOTICES.md $folder
           Set-Content "$folder/VERSION.txt" -Value $version -Encoding utf8
           $expected = @("Videoglue.exe","ffmpeg.exe","ffprobe.exe","VERSION.txt",
-                        "FFMPEG_VERSION.txt","LICENSE","LICENSE_FFMPEG.txt","THIRD_PARTY_NOTICES.md")
+                        "FFMPEG_VERSION.txt","FFMPEG_SOURCES.txt","FFMPEG_BUILD.sh",
+                        "FFMPEG_NVENC.patch","LICENSE","LICENSE_FFMPEG.txt","THIRD_PARTY_NOTICES.md")
           $actual = @(Get-ChildItem $folder -File)
           if (@(Get-ChildItem $folder -Directory).Count -or $actual.Count -ne $expected.Count) {
             throw "Unexpected staging layout"

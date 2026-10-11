@@ -19,7 +19,7 @@
 
 Windows x64: [GitHub Releases](https://github.com/medneem/Videoglue/releases). Распакуйте архив `Videoglue-vX.Y.N-windows-x64.zip` **в новую папку** и запустите `Videoglue.exe`. Python устанавливать не нужно.
 
-**Внимание:** опубликованный ранее [v0.1.2](https://github.com/medneem/Videoglue/releases/tag/v0.1.2) собран с неподходящей версией FFmpeg; **стабилизация с этой комплектацией не гарантируется**. Для полноценной работы необходима **проверенная сборка FFmpeg 7.1.5**. Новый релиз появится только после подключения её к CI.
+**Внимание:** опубликованный ранее [v0.1.2](https://github.com/medneem/Videoglue/releases/tag/v0.1.2) собран с неподходящей версией FFmpeg; **стабилизация с этой комплектацией не гарантируется**. Для полноценной работы необходима **проверенная сборка FFmpeg 7.1.5**. Новые релизы собирают FFmpeg 7.1.5 из исходников прямо в CI.
 
 В портативном дистрибутиве `ffmpeg.exe` и `ffprobe.exe` лежат **рядом с `Videoglue.exe`**, а не внутри него. Не удаляйте эти файлы. Папки `_internal` в архиве нет. Пользовательские настройки `config.jsonc` также хранятся рядом с EXE; для их сохранения при обновлении перенесите этот файл в новую папку.
 
@@ -42,23 +42,31 @@ Windows x64: [GitHub Releases](https://github.com/medneem/Videoglue/releases). �
 
 Для GPU нужны совместимая видеокарта NVIDIA, драйвер и поддержка CUDA/OpenCL. Опция удаления отражений использует CPU-стабилизацию, даже если видеокодирование выполняется через NVENC. При ошибке GPU приложение запрашивает разрешение на повторную обработку на CPU.
 
-## FFmpeg 7.1.5 — обязательное требование
+## FFmpeg 7.1.5 — сборка из исходников
 
-Для стабилизатора Videoglue необходима **именно протестированная сборка FFmpeg 7.1.5**, а не автоматически скачиваемая последняя версия. Совпадение версии само по себе не гарантирует совместимости: нужны фильтры `vidstabdetect`, `vidstabtransform`, `deshake_opencl`, `bwdif_cuda` и кодировщик `h264_nvenc`. Фактическую работу GPU-стабилизации следует проверять на NVIDIA.
+Videoglue требует **FFmpeg 7.1.5** с небольшим набором необходимых кодеков и фильтров. Готовые FFmpeg 8/9 ранее вызывали ошибки `deshake_opencl` на NVIDIA.
 
-Ревизии, сохранённые из документации собственной сборки:
+GitHub Actions собирает **статические Windows x64** `ffmpeg.exe` и `ffprobe.exe` на Ubuntu с помощью MinGW-w64, используя [`build_ffmpeg.sh`](build_ffmpeg.sh). Включены CPU-кодирование H.264, NVENC, CUDA-деинтерлейсинг и OpenCL/vid.stab-стабилизация.
 
-| Компонент | Версия или ревизия |
+| Зависимость | Закреплённая ревизия |
 |---|---|
-| **FFmpeg** | **7.1.5**, исходный тег `n7.1.5` |
-| **x264** | [`b35605ace3ddf7c1a5d67a2eb553f034aef41d55`](https://github.com/mirror/x264/commit/b35605ace3ddf7c1a5d67a2eb553f034aef41d55) |
-| vid.stab | 1.1.1 |
-| nv-codec-headers | 12.2.72.0 |
-| OpenCL Headers / ICD Loader | 2024.10.24 |
+| FFmpeg | `n7.1.5` |
+| x264 | [`b35605ace3ddf7c1a5d67a2eb553f034aef41d55`](https://github.com/mirror/x264/commit/b35605ace3ddf7c1a5d67a2eb553f034aef41d55) |
+| vid.stab | `v1.1.1` |
+| nv-codec-headers | `n12.2.72.0` |
+| OpenCL Headers и ICD Loader | `v2024.10.24` |
 
-**Важно:** `b35605ace3ddf7c1a5d67a2eb553f034aef41d55` — **Git-коммит x264**, не SHA-256 файла FFmpeg и не контрольная сумма ZIP. Его нельзя подставлять в `FFMPEG_715_SHA256`.
+**Этот хэш — Git-коммит x264, а не SHA-256 бинарника FFmpeg.** Хэши готовых EXE и ревизии исходников записываются в `FFMPEG_SOURCES.txt`.
 
-В прежней специализированной сборке также применялся патч NVENC для параметра `rc_framerate`. Скрипт сборки и сам патч **отсутствуют в текущем GitHub-репозитории**; без них невозможно считать новую сборку воспроизведением прежней. Используйте уже протестированные бинарники.
+[`ffmpeg-nvenc-rate.patch`](ffmpeg-nvenc-rate.patch) добавляет параметр `rc_framerate`, чтобы NVENC верно рассчитывал VBR после объединения видео с переменным FPS, не меняя временные метки. Если патч не применился, сборка завершится ошибкой.
+
+Локальная сборка из Ubuntu/WSL (после установки Git, MinGW-w64, Make, NASM, CMake, Clang/LLVM и pkg-config):
+
+```bash
+JOBS=4 bash build_ffmpeg.sh
+```
+
+Готовые файлы: `~/videoglue-ffmpeg-build/output/ffmpeg.exe` и `ffprobe.exe`.
 
 ## Разработка и тестирование
 
@@ -99,22 +107,15 @@ GUI-тестам нужен графический рабочий стол; ин
 
 ## GitHub Actions: версии и релизы
 
-[Windows pipeline](https://github.com/medneem/Videoglue/actions/workflows/build-windows.yml) запускается при `push` в `master`, при pull request и вручную. Версия определяется как `0.1.<номер запуска>` (базовая часть задаётся через `BASE_VERSION`): например, запуск №42 создаёт тег `v0.1.42` и ZIP `Videoglue-v0.1.42-windows-x64.zip`.
+[Windows pipeline](https://github.com/medneem/Videoglue/actions/workflows/build-windows.yml) запускается при push в `master`, в pull request и вручную. Версия — `0.1.<номер запуска>`; например, запуск №42 создаёт тег `v0.1.42` и ZIP `Videoglue-v0.1.42-windows-x64.zip`.
 
-Для сборки CI **не скачивает FFmpeg по ссылке latest**. Вместо этого требуются:
+1. **Ubuntu:** кросс-компиляция FFmpeg и FFprobe 7.1.5 из закреплённых исходников, фиксация SHA-256 и коммитов.
+2. **Windows:** проверка версии, фильтров, NVENC-патча, запуск тестов и PyInstaller `--onefile`.
+3. **Публикация:** проверка содержимого ZIP, загрузка в Actions → Artifacts (14 дней) и, после успешной сборки ветки `master`, в GitHub Releases.
 
-1. Служебный GitHub Release с тегом `ffmpeg-7.1.5-toolchain` и файлом `ffmpeg-7.1.5-windows-x64.zip`, содержащим проверенные `ffmpeg.exe` и `ffprobe.exe` версии **7.1.5**.
-2. Переменная репозитория **`FFMPEG_715_SHA256`** в *Settings → Secrets and variables → Actions → Variables*. Это **64-символьный SHA-256 всего ZIP**, а не коммит x264. В PowerShell вычисляется командой:
+В ZIP содержатся `Videoglue.exe`, `ffmpeg.exe`, `ffprobe.exe`, сведения о версиях и исходниках, скрипт и патч для FFmpeg, а также лицензии. Все файлы находятся рядом с EXE, без папки `_internal`. **Не нужны ручная загрузка бинарников FFmpeg, отдельный SHA-256 ZIP или служебный релиз.**
 
-   ```powershell
-   (Get-FileHash .\ffmpeg-7.1.5-windows-x64.zip -Algorithm SHA256).Hash
-   ```
-
-CI сверяет SHA-256, версии бинарников, требуемые фильтры и кодировщик, выполняет тесты, собирает EXE и проверяет ZIP. Если эталонного архива или SHA-256 нет, **сборка останавливается, новый релиз не публикуется**.
-
-После успешной сборки архив доступен в **Actions → Artifacts** (14 дней). Для `master` тот же архив публикуется в **GitHub Releases**; для pull request релиз не создаётся.
-
-Состав выходного ZIP: `Videoglue.exe`, `ffmpeg.exe`, `ffprobe.exe`, `VERSION.txt`, `FFMPEG_VERSION.txt`, `LICENSE`, `LICENSE_FFMPEG.txt`, `THIRD_PARTY_NOTICES.md`.
+CI проверяет поддержку требуемых функций, но не тестирует работу стабилизации на реальной видеокарте NVIDIA. После первой сборки следует выполнить такой тест вручную.
 
 ## Диагностика и лицензии
 

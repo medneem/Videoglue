@@ -39,3 +39,6 @@ Desktop.ini
 /release/
 /Videoglue-v*-windows-x64.zip
 /windows_version_info.txt
+
+# Cross-compiler workspace
+/.ffmpeg-build/
