@@ -213,7 +213,7 @@ class VideoGlue(VideoListMixin, TkinterDnD.Tk):
         """Краткая информация без отдельного окна параметров."""
         messagebox.showinfo(
             "О Videoglue",
-            f"Videoglue {APP_VERSION} — Склейка видео\\n"
+            f"Videoglue {APP_VERSION} — Склейка видео\n"
             "Добавляйте ролики, меняйте порядок и создавайте один видеофайл.",
             parent=self)
 
