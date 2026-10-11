@@ -30,7 +30,7 @@ class ReleaseTests(unittest.TestCase):
                  patch.object(media_ffmpeg.sys, "frozen", True, create=True), \
                  patch.object(media_ffmpeg.sys, "executable", str(exe)), \
                  patch.object(media_ffmpeg.shutil, "which", return_value=None):
-                self.assertEqual(media_ffmpeg.ffmpeg_path(), str(ffmpeg))
+                self.assertEqual(Path(media_ffmpeg.ffmpeg_path()).resolve(), ffmpeg.resolve())
 
 
 if __name__ == "__main__":
