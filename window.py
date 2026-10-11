@@ -436,6 +436,8 @@ class VideoGlue(VideoListMixin, TkinterDnD.Tk):
         self.processing_mode = ""
         self.gpu_fallback_reason = None
         self.prepare_progress(len(self.videos))
+        self.progress_label_var.set("Подготовка к перекодированию…" if compress
+                                    else "Склейка без преобразования…")
         self.status.set("Подготовка к перекодированию…" if compress else "Склейка без преобразования…")
         # Сумма входных длительностей служит знаменателем для out_time.
         durations = {path: duration for path, duration in self.items}
@@ -473,6 +475,7 @@ class VideoGlue(VideoListMixin, TkinterDnD.Tk):
             elif kind == "scan_done":
                 self.finish_scan()
             elif kind == "analyzing":
+                self.progress_label_var.set("Проверка видео на чересстрочность…")
                 self.status.set("Проверка видео на чересстрочность…")
             elif kind == "fields_ready":
                 self.refresh_estimate(data)
@@ -516,6 +519,7 @@ class VideoGlue(VideoListMixin, TkinterDnD.Tk):
                 )
                 if allowed:
                     self.gpu_fallback_reason = reason
+                    self.progress_label_var.set("Подготовка повторной обработки на процессоре…")
                     self.status.set("Подготовка повторной обработки на процессоре…")
                 self.worker.answer_cpu_fallback(allowed)
             elif kind == "merge_progress":
