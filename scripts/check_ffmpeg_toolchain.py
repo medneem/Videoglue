@@ -90,6 +90,10 @@ def validate(ffmpeg: Path, ffprobe: Path) -> str:
                               "-an", "-f", "null", "-")
         if not re.search(r"av1 \(libdav1d\) ->", auto_output):
             raise ValueError("FFmpeg is not selecting libdav1d for AV1 input")
+        # Videoglue compresses AV1 input to H.264; check this path too.
+        capture(ffmpeg, "-hide_banner", "-loglevel", "error", "-nostdin",
+                "-i", str(sample), "-frames:v", "1", "-an",
+                "-c:v", "libx264", "-pix_fmt", "yuv420p", "-f", "null", "-")
 
     options = capture(ffmpeg, "-hide_banner", "-h", "encoder=h264_nvenc")
     if not re.search(r"\brc_framerate\b", options):
