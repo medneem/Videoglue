@@ -37,6 +37,10 @@ jobs:
             binutils-mingw-w64-x86-64 nasm yasm cmake meson ninja-build clang llvm pkg-config \
             autoconf automake libtool python3
 
+      - name: Validate FFmpeg build script syntax
+        if: steps.ffmpeg-cache.outputs.cache-hit != 'true'
+        run: bash -n build_ffmpeg.sh
+
       - name: Cross-compile pinned FFmpeg with NVENC, stabilization and dav1d
         if: steps.ffmpeg-cache.outputs.cache-hit != 'true'
         env:
