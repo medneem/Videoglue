@@ -55,7 +55,7 @@ jobs:
           # Static portable binaries must not require MinGW/dav1d DLL files.
           for exe in ffmpeg.exe ffprobe.exe; do
             if x86_64-w64-mingw32-objdump -p ".ffmpeg-build/output/$exe" | \
-                grep -Ei 'DLL Name: (libdav1d|libgcc_s|libstdc\\+\\+|libwinpthread|libx264)[^[:space:]]*\\.dll'; then
+                grep -Ei 'DLL Name: (libdav1d|libgcc_s|libstdc[+][+]|libwinpthread|libx264)[^[:space:]]*[.]dll'; then
               echo "::error::Unexpected non-system DLL dependency: $exe"
               exit 1
             fi
