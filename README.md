@@ -13,7 +13,7 @@
 - Кодирование на **CPU** или **NVIDIA NVENC** с подтверждением перехода на CPU при ошибке GPU.
 - Предварительная оценка размера, отображение прогресса и журнал диагностики.
 
-Входные форматы: `.mp4`, `.mov`, `.mkv`, `.avi`, `.webm`, `.m4v`. Поддержка конкретного файла зависит от его кодеков.
+Входные форматы: `.mp4`, `.mov`, `.mkv`, `.avi`, `.webm`, `.m4v`. Поддержка конкретного файла зависит от его кодеков. В комплектной Windows-сборке AV1 декодируется программно через `libdav1d`, даже если GPU не поддерживает AV1.
 
 ## Скачать и запустить
 
@@ -46,13 +46,14 @@ Windows x64: [GitHub Releases](https://github.com/medneem/Videoglue/releases). �
 
 Videoglue требует **FFmpeg 7.1.5** с небольшим набором необходимых кодеков и фильтров. Готовые FFmpeg 8/9 ранее вызывали ошибки `deshake_opencl` на NVIDIA.
 
-GitHub Actions собирает **статические Windows x64** `ffmpeg.exe` и `ffprobe.exe` на Ubuntu с помощью MinGW-w64, используя [`build_ffmpeg.sh`](build_ffmpeg.sh). Включены CPU-кодирование H.264, NVENC, CUDA-деинтерлейсинг и OpenCL/vid.stab-стабилизация.
+GitHub Actions собирает **статические Windows x64** `ffmpeg.exe` и `ffprobe.exe` на Ubuntu с помощью MinGW-w64, используя [`build_ffmpeg.sh`](build_ffmpeg.sh). Включены CPU-кодирование H.264, NVENC, программное AV1-декодирование через `libdav1d`, CUDA-деинтерлейсинг и OpenCL/vid.stab-стабилизация.
 
 | Зависимость | Закреплённая ревизия |
 |---|---|
 | FFmpeg | `n7.1.5` |
 | x264 | [`b35605ace3ddf7c1a5d67a2eb553f034aef41d55`](https://github.com/mirror/x264/commit/b35605ace3ddf7c1a5d67a2eb553f034aef41d55) |
 | vid.stab | `v1.1.1` |
+| dav1d | `1.5.4` |
 | nv-codec-headers | `n12.2.72.0` |
 | OpenCL Headers и ICD Loader | `v2024.10.24` |
 
