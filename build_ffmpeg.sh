@@ -48,14 +48,21 @@ make install
 popd
 
 # Build AV1 software decoding as a static Windows library.
+# The upstream cross file sets exe_wrapper=wine; CI has no Wine installed.
+# An FFmpeg CLI build only needs a C cross-compiler, not an EXE runner.
+DAV1D_CROSS_FILE="$ROOT/dav1d-windows-x64.meson"
+sed '/^exe_wrapper[[:space:]]*=/d' \
+    "$ROOT/src/dav1d/package/crossfiles/x86_64-w64-mingw32.meson" > "$DAV1D_CROSS_FILE"
 meson setup "$ROOT/src/dav1d/build" "$ROOT/src/dav1d" \
-    --cross-file "$ROOT/src/dav1d/package/crossfiles/x86_64-w64-mingw32.meson" \
+    --cross-file "$DAV1D_CROSS_FILE" \
     --prefix="$PREFIX" --libdir=lib --default-library=static --buildtype=release \
     -Denable_tools=false -Denable_tests=false -Denable_examples=false
 meson compile -C "$ROOT/src/dav1d/build" -j "$JOBS"
 meson install -C "$ROOT/src/dav1d/build"
 test -s "$PREFIX/lib/libdav1d.a"
 test -s "$PREFIX/lib/pkgconfig/dav1d.pc"
+pkg-config --static --modversion dav1d
+pkg-config --static --libs dav1d
 
 cmake -S "$ROOT/src/vidstab" -B "$ROOT/src/vidstab/build" \
     -DCMAKE_SYSTEM_NAME=Windows -DCMAKE_C_COMPILER=x86_64-w64-mingw32-gcc \
