@@ -23,6 +23,7 @@ if ! git -C "$ROOT/src/x264" cat-file -e "$X264_COMMIT^{commit}" 2>/dev/null; th
 fi
 git -C "$ROOT/src/x264" checkout --detach "$X264_COMMIT"
 test "$(git -C "$ROOT/src/x264" rev-parse HEAD)" = "$X264_COMMIT"
+clone dav1d https://github.com/videolan/dav1d.git 1.5.4
 clone vidstab https://github.com/georgmartius/vid.stab.git v1.1.1
 clone nvcodec https://github.com/FFmpeg/nv-codec-headers.git n12.2.72.0
 clone opencl-headers https://github.com/KhronosGroup/OpenCL-Headers.git v2024.10.24
@@ -45,6 +46,16 @@ pushd "$ROOT/src/x264"
 make -j "$JOBS"
 make install
 popd
+
+# Build AV1 software decoding as a static Windows library.
+meson setup "$ROOT/src/dav1d/build" "$ROOT/src/dav1d" \
+    --cross-file "$ROOT/src/dav1d/package/crossfiles/x86_64-w64-mingw32.meson" \
+    --prefix="$PREFIX" --libdir=lib --default-library=static --buildtype=release \
+    -Denable_tools=false -Denable_tests=false -Denable_examples=false
+meson compile -C "$ROOT/src/dav1d/build" -j "$JOBS"
+meson install -C "$ROOT/src/dav1d/build"
+test -s "$PREFIX/lib/libdav1d.a"
+test -s "$PREFIX/lib/pkgconfig/dav1d.pc"
 
 cmake -S "$ROOT/src/vidstab" -B "$ROOT/src/vidstab/build" \
     -DCMAKE_SYSTEM_NAME=Windows -DCMAKE_C_COMPILER=x86_64-w64-mingw32-gcc \
@@ -78,7 +89,7 @@ fi
     --enable-static --disable-shared --disable-autodetect --disable-debug \
     --disable-doc --disable-ffplay --enable-ffprobe \
     --disable-network --disable-devices --disable-postproc \
-    --enable-indev=lavfi --enable-gpl --enable-libx264 --enable-libvidstab \
+    --enable-indev=lavfi --enable-gpl --enable-libx264 --enable-libvidstab --enable-libdav1d \
     --enable-opencl --enable-ffnvcodec --enable-nvenc --enable-cuda-llvm \
     --disable-encoders --enable-encoder=libx264,h264_nvenc,aac,mpeg4,dvvideo,flac,pcm_s16le,wrapped_avframe,rawvideo \
     --disable-muxers --enable-muxer=mp4,mov,matroska,avi,null,framehash,rawvideo \
@@ -88,12 +99,14 @@ fi
 make -j "$JOBS" ffmpeg.exe ffprobe.exe
 cp ffmpeg.exe "$ROOT/output/ffmpeg.exe"
 cp ffprobe.exe "$ROOT/output/ffprobe.exe"
+cp "$ROOT/src/dav1d/COPYING" "$ROOT/output/LICENSE_DAV1D.txt"
 {
-    for name in ffmpeg x264 vidstab nvcodec opencl-headers opencl-loader; do
+    for name in ffmpeg x264 dav1d vidstab nvcodec opencl-headers opencl-loader; do
         printf '%s ' "$name"
         git -C "$ROOT/src/$name" rev-parse HEAD
     done
-    sha256sum "$ROOT/output/ffmpeg.exe" "$ROOT/output/ffprobe.exe" "$PATCH" \
+    sha256sum "$ROOT/output/ffmpeg.exe" "$ROOT/output/ffprobe.exe" \
+        "$ROOT/output/LICENSE_DAV1D.txt" "$PATCH" \
         "$SCRIPT_DIR/ffmpeg-stabilization.patch" "$SCRIPT_DIR/vidstab-stabilization.patch" \
         "$SCRIPT_DIR/build_ffmpeg.sh"
 } > "$ROOT/output/sources.txt"
