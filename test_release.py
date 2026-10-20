@@ -6,7 +6,9 @@ from unittest.mock import patch
 
 import ffmpeg as media_ffmpeg
 from scripts.stamp_version import make_version, stamp_version
-from scripts.check_ffmpeg_toolchain import matches_required_version
+from scripts.check_ffmpeg_toolchain import (
+    decoded_one_frame, has_software_av1_decoder, matches_required_version,
+)
 
 
 class ReleaseTests(unittest.TestCase):
@@ -22,6 +24,21 @@ class ReleaseTests(unittest.TestCase):
         for version in ("7.1", "7.1.4", "7.1.50", "8.1.2", "9.0.2"):
             self.assertFalse(matches_required_version("ffmpeg", f"ffmpeg version {version} Copyright"))
         self.assertFalse(matches_required_version("ffprobe", "ffprobe version 7.1.4 Copyright"))
+
+    def test_av1_decoder_requires_libdav1d(self):
+        self.assertTrue(has_software_av1_decoder(
+            "Decoders:\n V....D av1    Alliance for Open Media AV1\n"
+            " V..... libdav1d dav1d AV1 decoder by VideoLAN\n"
+        ))
+        self.assertFalse(has_software_av1_decoder(
+            "Decoders:\n V....D av1    Alliance for Open Media AV1\n"
+            " A....D wmav1  Windows Media Audio 1\n"
+        ))
+
+    def test_av1_smoke_requires_decoded_frame(self):
+        self.assertTrue(decoded_one_frame("frame=    1 fps=0.0 q=-0.0 Lsize=N/A"))
+        self.assertFalse(decoded_one_frame("frame=    0 fps=0.0 q=-0.0 Lsize=N/A"))
+        self.assertFalse(decoded_one_frame("Error while decoding stream"))
 
     def test_version_resource(self):
         with tempfile.TemporaryDirectory() as folder:
