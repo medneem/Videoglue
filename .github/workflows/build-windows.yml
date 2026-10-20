@@ -50,7 +50,7 @@ jobs:
           file .ffmpeg-build/output/ffprobe.exe | grep -q "PE32+ executable"
           test -s .ffmpeg-build/output/sources.txt
           grep -q "b35605ace3ddf7c1a5d67a2eb553f034aef41d55" .ffmpeg-build/output/sources.txt
-          grep -Eq '^dav1d [0-9a-f]{40}
+          grep -Eq "^dav1d [0-9a-f]{40}$" .ffmpeg-build/output/sources.txt
           # Verify both cached and freshly compiled executables against their recorded hashes.
           for exe in ffmpeg.exe ffprobe.exe LICENSE_DAV1D.txt; do
             expected=$(awk -v exe="$exe" '$2 ~ ("/" exe "$") { print $1 }' .ffmpeg-build/output/sources.txt)
