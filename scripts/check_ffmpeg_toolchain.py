@@ -31,6 +31,11 @@ def has_software_av1_decoder(output: str) -> bool:
 
 
 
+def decoded_one_frame(output: str) -> bool:
+    """Reject FFmpeg's zero-frame 'success' on a broken/unsupported input."""
+    return bool(re.search(r"(?m)^frame=\s*1\b", output))
+
+
 def matches_required_version(program: str, output: str) -> bool:
     """Accept 7.1.5 or n7.1.5, never 7.1 or 7.1.50 or 8/9."""
     first_line = output.splitlines()[0].strip() if output.splitlines() else ""
@@ -82,18 +87,28 @@ def validate(ffmpeg: Path, ffprobe: Path) -> str:
     with tempfile.TemporaryDirectory() as temp_dir:
         sample = Path(temp_dir) / "av1-smoke.ivf"
         sample.write_bytes(base64.b64decode(AV1_SAMPLE_IVF_B64))
-        capture(ffmpeg, "-hide_banner", "-loglevel", "error", "-nostdin",
-                "-c:v", REQUIRED_DECODER, "-i", str(sample),
-                "-frames:v", "1", "-an", "-f", "null", "-")
+        forced = capture(ffmpeg, "-hide_banner", "-nostdin",
+                         "-c:v", REQUIRED_DECODER, "-i", str(sample),
+                         "-frames:v", "1", "-an", "-f", "null", "-")
+        if not decoded_one_frame(forced):
+            raise ValueError("FFmpeg libdav1d failed to decode one AV1 frame")
+
         auto_output = capture(ffmpeg, "-hide_banner", "-nostdin",
                               "-i", str(sample), "-frames:v", "1",
                               "-an", "-f", "null", "-")
         if not re.search(r"av1 \(libdav1d\) ->", auto_output):
             raise ValueError("FFmpeg is not selecting libdav1d for AV1 input")
+        if not decoded_one_frame(auto_output):
+            raise ValueError("FFmpeg failed to automatically decode one AV1 frame")
+
         # Videoglue compresses AV1 input to H.264; check this path too.
-        capture(ffmpeg, "-hide_banner", "-loglevel", "error", "-nostdin",
-                "-i", str(sample), "-frames:v", "1", "-an",
-                "-c:v", "libx264", "-pix_fmt", "yuv420p", "-f", "null", "-")
+        compressed = capture(ffmpeg, "-hide_banner", "-nostdin",
+                             "-i", str(sample), "-frames:v", "1", "-an",
+                             "-c:v", "libx264", "-pix_fmt", "yuv420p", "-f", "null", "-")
+        if not re.search(r"av1 \(libdav1d\) -> h264 \(libx264\)", compressed):
+            raise ValueError("FFmpeg AV1->H.264 decoder/encoder selection failed")
+        if not decoded_one_frame(compressed):
+            raise ValueError("FFmpeg AV1->H.264 compression produced no frames")
 
     options = capture(ffmpeg, "-hide_banner", "-h", "encoder=h264_nvenc")
     if not re.search(r"\brc_framerate\b", options):
