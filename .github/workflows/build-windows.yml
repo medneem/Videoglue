@@ -52,6 +52,14 @@ jobs:
           set -euo pipefail
           file .ffmpeg-build/output/ffmpeg.exe | grep -q "PE32+ executable"
           file .ffmpeg-build/output/ffprobe.exe | grep -q "PE32+ executable"
+          # Static portable binaries must not require MinGW/dav1d DLL files.
+          for exe in ffmpeg.exe ffprobe.exe; do
+            if x86_64-w64-mingw32-objdump -p ".ffmpeg-build/output/$exe" | \
+                grep -Ei 'DLL Name: (libdav1d|libgcc_s|libstdc\\+\\+|libwinpthread|libx264)[^[:space:]]*\\.dll'; then
+              echo "::error::Unexpected non-system DLL dependency: $exe"
+              exit 1
+            fi
+          done
           test -s .ffmpeg-build/output/sources.txt
           grep -q "b35605ace3ddf7c1a5d67a2eb553f034aef41d55" .ffmpeg-build/output/sources.txt
           grep -Eq "^dav1d [0-9a-f]{40}$" .ffmpeg-build/output/sources.txt
