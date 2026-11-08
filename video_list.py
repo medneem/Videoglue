@@ -12,6 +12,7 @@ from types import SimpleNamespace
 from tkinterdnd2 import COPY, DND_FILES
 
 from ffmpeg import MediaInfo, ffmpeg_path, format_duration, probe_media
+from dpi import scaled_pixels
 
 
 VIDEO_EXTENSIONS = {".mp4", ".mov", ".mkv", ".avi", ".webm", ".m4v"}
@@ -19,31 +20,17 @@ ICON_SIZE = 20
 
 
 def draw_bootstrap_icon(canvas: tk.Canvas, kind: str, color: str) -> None:
-    """Нарисовать контуры Bootstrap Icons: square, check-square и x-lg.
-
-    Источник форм: icons.getbootstrap.com/icons/square/,
-    /icons/check-square/ и /icons/x-lg/ (лицензия MIT).
-    """
-    if getattr(canvas, "icon_state", None) == (kind, color):
+    """Draw the remaining removal cross at native resolution on high-DPI screens."""
+    state = (kind, color)
+    if getattr(canvas, "icon_state", None) == state:
         return
-    canvas.icon_state = (kind, color)
+    canvas.icon_state = state
     canvas.delete("all")
-    if kind == "remove":
-        canvas.create_line(4, 4, 16, 16, fill=color, width=2, capstyle="round")
-        canvas.create_line(16, 4, 4, 16, fill=color, width=2, capstyle="round")
-    else:
-        # Скруглённые углы повторяют внешний контур исходных SVG.
-        for start, box in ((90, (2, 2, 6, 6)), (0, (14, 2, 18, 6)),
-                           (270, (14, 14, 18, 18)), (180, (2, 14, 6, 18))):
-            canvas.create_arc(*box, start=start, extent=90, style="arc", outline=color, width=1.5)
-        for points in ((4, 2, 16, 2), (18, 4, 18, 16),
-                       (16, 18, 4, 18), (2, 16, 2, 4)):
-            canvas.create_line(*points, fill=color, width=1.5)
-        if kind == "checked":
-            # Три опорные точки повторяют галочку в check-square.svg.
-            canvas.create_line(6, 10, 9, 13, 15, 6, fill=color, width=2,
-                               capstyle="round", joinstyle="round")
-
+    scale = int(canvas.cget("width")) / ICON_SIZE
+    canvas.create_line(4 * scale, 4 * scale, 16 * scale, 16 * scale,
+                       fill=color, width=2 * scale, capstyle="round")
+    canvas.create_line(16 * scale, 4 * scale, 4 * scale, 16 * scale,
+                       fill=color, width=2 * scale, capstyle="round")
 
 class VideoListMixin:
     """Управлять списком роликов и его виджетами в главном окне.
@@ -72,8 +59,8 @@ class VideoListMixin:
         self.arrival_jobs: dict[str, str] = {}
         self.removal_jobs: dict[str, list[str]] = {}
         self.icon_refresh_job: str | None = None
-        self.row_icons: dict[str, tuple[tk.Canvas, tk.Canvas]] = {}
-        self.icon_pool: list[tuple[tk.Canvas, tk.Canvas]] = []
+        self.row_icons: dict[str, tuple[ttk.Checkbutton, tk.Canvas]] = {}
+        self.icon_pool: list[tuple[ttk.Checkbutton, tk.Canvas]] = []
 
         top = ttk.Frame(self, padding=12)
         top.grid(row=0, column=0, sticky="ew")
@@ -96,7 +83,9 @@ class VideoListMixin:
         self.drop_surface.columnconfigure(0, weight=1)
         self.drop_surface.rowconfigure(0, weight=1)
         style = ttk.Style(self)
-        style.configure("Video.Treeview", rowheight=30, font=("TkDefaultFont", 10))
+        self.icon_size = scaled_pixels(ICON_SIZE, self.tk_scaling)
+        style.configure("Video.Treeview", rowheight=scaled_pixels(30, self.tk_scaling),
+                        font=("TkDefaultFont", 10))
         style.configure("Video.Treeview.Heading", font=("TkDefaultFont", 10, "bold"))
         self.tree = ttk.Treeview(self.drop_surface, columns=("include", "number", "name", "size", "duration", "remove"),
                                  show="headings", style="Video.Treeview", selectmode="browse")
@@ -106,12 +95,12 @@ class VideoListMixin:
         self.tree.heading("size", text="Размер, МиБ")
         self.tree.heading("duration", text="Длительность")
         self.tree.heading("remove", text="", command=self.clear_files)
-        self.tree.column("include", width=48, minwidth=48, anchor="center", stretch=False)
-        self.tree.column("number", width=105, anchor="center", stretch=False)
-        self.tree.column("name", width=300)
-        self.tree.column("size", width=110, anchor="e", stretch=False)
-        self.tree.column("duration", width=140, anchor="center", stretch=False)
-        self.tree.column("remove", width=42, minwidth=42, anchor="center", stretch=False)
+        self.tree.column("include", width=scaled_pixels(48, self.tk_scaling), minwidth=scaled_pixels(48, self.tk_scaling), anchor="center", stretch=False)
+        self.tree.column("number", width=scaled_pixels(105, self.tk_scaling), anchor="center", stretch=False)
+        self.tree.column("name", width=scaled_pixels(300, self.tk_scaling))
+        self.tree.column("size", width=scaled_pixels(110, self.tk_scaling), anchor="e", stretch=False)
+        self.tree.column("duration", width=scaled_pixels(140, self.tk_scaling), anchor="center", stretch=False)
+        self.tree.column("remove", width=scaled_pixels(42, self.tk_scaling), minwidth=scaled_pixels(42, self.tk_scaling), anchor="center", stretch=False)
         self.tree.grid(row=0, column=0, sticky="nsew")
         self.tree.tag_configure("stripe", background="#f1f5fa")
         self.tree.tag_configure("drop_target", background="#c6e2ff", foreground="#133b68")
@@ -129,12 +118,13 @@ class VideoListMixin:
         self.tree.bind("<Configure>", self.schedule_icon_refresh, add="+")
         self.tree.bind("<<TreeviewSelect>>", self.schedule_icon_refresh, add="+")
         heading_background = style.lookup("Treeview.Heading", "background") or "#f0f0f0"
-        self.heading_icon = tk.Canvas(self.tree, width=ICON_SIZE, height=ICON_SIZE,
-                                      highlightthickness=0, background=heading_background, cursor="hand2")
-        self.heading_icon.place(x=(self.tree.column("include", "width") - ICON_SIZE) // 2, y=3)
-        self.heading_icon.bind("<Button-1>", lambda _event: self.toggle_all_rows())
-        draw_bootstrap_icon(self.heading_icon, "empty", "#375c83")
-        self.clear_icon = tk.Canvas(self.tree, width=ICON_SIZE, height=ICON_SIZE,
+        self.heading_checked = tk.BooleanVar(master=self.tree, value=False)
+        self.heading_icon = ttk.Checkbutton(self.tree, variable=self.heading_checked,
+                                            command=self.toggle_all_rows, takefocus=False, cursor="hand2")
+        self.heading_icon.place(
+            x=(self.tree.column("include", "width") - self.heading_icon.winfo_reqwidth()) // 2,
+            y=scaled_pixels(3, self.tk_scaling))
+        self.clear_icon = tk.Canvas(self.tree, width=self.icon_size, height=self.icon_size,
                                     highlightthickness=0, background=heading_background, cursor="hand2")
         self.clear_icon.bind("<Button-1>", lambda _event: self.clear_files())
         draw_bootstrap_icon(self.clear_icon, "remove", "#be2437")
@@ -229,31 +219,37 @@ class VideoListMixin:
             return "#0078d7" if sys.platform == "win32" else "#4a83ba"
         return "#ffffff"
 
-    def make_row_icon(self, row: str, column: str) -> tk.Canvas:
-        """Создать накладной значок с прежним поведением ячейки таблицы."""
-        icon = tk.Canvas(self.tree, width=ICON_SIZE, height=ICON_SIZE,
+    def make_row_icon(self, row: str, column: str) -> ttk.Checkbutton | tk.Canvas:
+        """Overlay a native checkbox or the removal cross on a visible Treeview cell."""
+        if column == "include":
+            icon = ttk.Checkbutton(self.tree, takefocus=False, cursor="hand2")
+            icon.row = row
+            icon.checked = tk.BooleanVar(master=self.tree, value=row in self.included_rows)
+            icon.configure(variable=icon.checked, command=lambda: self.toggle_row(icon.row))
+            return icon
+        icon = tk.Canvas(self.tree, width=self.icon_size, height=self.icon_size,
                          highlightthickness=0, cursor="hand2")
         icon.row = row
-        if column == "include":
-            # При прокрутке Canvas получает другую строку без регистрации
-            # новых Tcl-колбэков; число виджетов зависит от высоты окна.
-            icon.bind("<Button-1>", lambda _event: self.toggle_row(icon.row))
-        else:
-            icon.bind("<ButtonPress-1>", lambda event: self.start_row_drag(
-                SimpleNamespace(x=event.widget.winfo_x() + event.x,
-                                y=event.widget.winfo_y() + event.y)))
-            icon.bind("<ButtonRelease-1>", lambda _event: self.finish_row_drag(
-                SimpleNamespace(x=self.tree.winfo_pointerx() - self.tree.winfo_rootx(),
-                                y=self.tree.winfo_pointery() - self.tree.winfo_rooty())))
+        icon.bind("<ButtonPress-1>", lambda event: self.start_row_drag(
+            SimpleNamespace(x=event.widget.winfo_x() + event.x,
+                            y=event.widget.winfo_y() + event.y)))
+        icon.bind("<ButtonRelease-1>", lambda _event: self.finish_row_drag(
+            SimpleNamespace(x=self.tree.winfo_pointerx() - self.tree.winfo_rootx(),
+                            y=self.tree.winfo_pointery() - self.tree.winfo_rooty())))
         return icon
 
     def refresh_row_icons(self) -> None:
         """Показать значки только в видимых ячейках Treeview."""
         self.icon_refresh_job = None
         height = self.tree.winfo_height()
+        self.heading_icon.place_configure(
+            x=(self.tree.column("include", "width") - self.heading_icon.winfo_reqwidth()) // 2)
+        self.heading_icon.state(("disabled",) if self.busy else ("!disabled",))
         self.clear_icon.place(x=self.tree.winfo_width() - self.tree.column("remove", "width")
-                              + (self.tree.column("remove", "width") - ICON_SIZE) // 2 - 1, y=3)
-        row_height = int(ttk.Style(self).lookup("Video.Treeview", "rowheight") or 30)
+                              + (self.tree.column("remove", "width") - self.icon_size) // 2 - 1,
+                              y=scaled_pixels(3, self.tk_scaling))
+        row_height = int(ttk.Style(self).lookup("Video.Treeview", "rowheight")
+                         or scaled_pixels(30, self.tk_scaling))
         # identify_row позволяет найти видимые строки без обхода всего списка.
         rows = {self.tree.identify_row(y) for y in range(0, height, max(1, row_height // 2))}
         rows.add(self.tree.identify_row(max(0, height - 1)))
@@ -277,14 +273,17 @@ class VideoListMixin:
                     icon.place_forget()
                     continue
                 x, y, width, height = box
-                if icon.cget("background") != background:
-                    icon.configure(background=background)
-                kind = (("checked" if row in self.included_rows else "empty") if column == "include"
-                        else "remove")
-                color = "#be2437" if column == "remove" else "#375c83"
-                draw_bootstrap_icon(icon, kind, color)
-                icon.place(x=x + (width - ICON_SIZE) // 2,
-                           y=y + (height - ICON_SIZE) // 2)
+                if column == "include":
+                    icon.checked.set(row in self.included_rows)
+                    icon.state(("disabled",) if self.busy else ("!disabled",))
+                    icon_width, icon_height = icon.winfo_reqwidth(), icon.winfo_reqheight()
+                else:
+                    if icon.cget("background") != background:
+                        icon.configure(background=background)
+                    draw_bootstrap_icon(icon, "remove", "#be2437")
+                    icon_width = icon_height = self.icon_size
+                icon.place(x=x + (width - icon_width) // 2,
+                           y=y + (height - icon_height) // 2)
         # При уменьшении окна не оставляем большой запас скрытых виджетов.
         while len(self.icon_pool) > max(1, len(rows)):
             for icon in self.icon_pool.pop():
@@ -577,7 +576,7 @@ class VideoListMixin:
     def update_include_heading(self) -> None:
         """Показывать общий флажок, когда отмечены все строки таблицы."""
         checked = bool(self.items) and len(self.included_rows) == len(self.items)
-        draw_bootstrap_icon(self.heading_icon, "checked" if checked else "empty", "#375c83")
+        self.heading_checked.set(checked)
 
     def toggle_row(self, row: str) -> None:
         """Переключить участие файла в склейке, сохранив его в таблице."""

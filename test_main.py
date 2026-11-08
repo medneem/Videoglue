@@ -25,6 +25,35 @@ from window import VideoGlue
 
 
 class VideoListTests(unittest.TestCase):
+    def test_native_checkboxes_control_row_and_select_all(self) -> None:
+        """The table uses native ttk controls and synchronizes their values."""
+        with tempfile.TemporaryDirectory() as directory:
+            with patch.object(settings, "config_path", return_value=Path(directory) / "config.jsonc"):
+                app = VideoGlue()
+                try:
+                    app.add_scanned_row(1, 1, Path(directory) / "clip.mp4", 1.0)
+                    app.finish_scan()
+                    app.update()
+                    row = app.tree.get_children()[0]
+                    checkbox = app.row_icons[row][0]
+                    self.assertIsInstance(checkbox, video_list.ttk.Checkbutton)
+                    self.assertIsInstance(app.heading_icon, video_list.ttk.Checkbutton)
+                    self.assertTrue(checkbox.checked.get())
+                    checkbox.invoke()
+                    app.update()
+                    self.assertNotIn(row, app.included_rows)
+                    self.assertFalse(app.heading_checked.get())
+                    app.heading_icon.invoke()
+                    app.update()
+                    self.assertIn(row, app.included_rows)
+                    self.assertTrue(checkbox.checked.get())
+                    self.assertTrue(app.heading_checked.get())
+                    app.set_busy(True)
+                    app.update()
+                    self.assertTrue(checkbox.instate(("disabled",)))
+                finally:
+                    app.close()
+
     def test_clear_estimate_and_progress_follow_checked_files(self) -> None:
         """Размер не требует запуска FFmpeg; очистка не удаляет исходники."""
         with tempfile.TemporaryDirectory() as directory, \
@@ -80,18 +109,20 @@ class VideoListTests(unittest.TestCase):
                     app.add_scanned_row(index + 1, 1000, Path(directory) / f"clip-{index}.mp4", 1)
                 app.finish_scan()
                 app.update()
-                initial = sum(isinstance(child, video_list.tk.Canvas) for child in app.tree.winfo_children())
+                initial = sum(isinstance(child, (video_list.tk.Canvas, video_list.ttk.Checkbutton))
+                              for child in app.tree.winfo_children())
                 for fraction in (0.1, 0.3, 0.6, 0.9, 1.0, 0.0):
                     app.tree.yview_moveto(fraction)
                     app.update()
-                actual = sum(isinstance(child, video_list.tk.Canvas) for child in app.tree.winfo_children())
-                self.assertLessEqual(actual, initial + 4)
+                actual = sum(isinstance(child, (video_list.tk.Canvas, video_list.ttk.Checkbutton))
+                             for child in app.tree.winfo_children())
+                self.assertLessEqual(actual, initial + 8)
                 row = next(iter(app.row_icons))
                 icon = app.row_icons[row][0]
-                drawn = icon.find_all()
+                checked = icon.checked.get()
                 app.refresh_row_icons()
-                self.assertEqual(icon.find_all(), drawn)
-                icon.event_generate("<Button-1>")
+                self.assertEqual(icon.checked.get(), checked)
+                icon.invoke()
                 self.assertNotIn(row, app.included_rows)
                 self.assertEqual(len(app.videos), 999)
                 app.remove_pressed_row = row
@@ -279,7 +310,7 @@ class VideoListTests(unittest.TestCase):
                 self.assertEqual(app.videos, [second])
                 self.assertEqual(app.selected_duration.get(), "Общий хронометраж выбранных видео: 00:00:02")
                 self.assertNotIn(rows[0], app.included_rows)
-                app.heading_icon.event_generate("<Button-1>")
+                app.heading_icon.invoke()
                 self.assertEqual(app.videos, [first, second])
                 app.toggle_all_rows()
                 self.assertEqual(app.videos, [])
@@ -295,7 +326,7 @@ class VideoListTests(unittest.TestCase):
                 app.move_row(rows[1], rows[0])
                 self.assertEqual(app.videos, [second, first])
                 app.update()
-                app.row_icons[rows[0]][0].event_generate("<Button-1>")
+                app.row_icons[rows[0]][0].invoke()
                 self.assertEqual(app.videos, [second])
                 app.toggle_row(rows[0])
                 self.assertEqual(app.videos, [second, first])

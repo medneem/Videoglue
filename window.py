@@ -19,6 +19,7 @@ from merge import QUALITY_BITRATE, MergeWorker, estimate_output_size
 from settings import AUDIO_QUALITIES, FRAME_RATES, RESOLUTIONS, AppSettings, config_path, load_settings, save_settings
 from video_list import VideoListMixin
 from debug_log import journal
+from dpi import scaled_pixels
 
 
 class VideoGlue(VideoListMixin, TkinterDnD.Tk):
@@ -27,6 +28,9 @@ class VideoGlue(VideoListMixin, TkinterDnD.Tk):
     def __init__(self) -> None:
         """Создать интерфейс и подготовить обмен событиями с потоками."""
         super().__init__()
+        # Fonts use points in Tk, but window geometry and rows use pixels.
+        self.tk_scaling = float(self.tk.call("tk", "scaling"))
+        self.ui_scale = self.tk_scaling / (96 / 72)
         journal.write("APPLICATION START")
         self.saved_settings = load_settings()
         self.last_input_dir = Path(self.saved_settings.input_dir) if self.saved_settings.input_dir else None
@@ -38,11 +42,12 @@ class VideoGlue(VideoListMixin, TkinterDnD.Tk):
         self.poll_job: str | None = None
         self.estimate_job: str | None = None
         self.title(f"Videoglue {APP_VERSION} — Склейка видео")
-        geometry = f"{self.saved_settings.width}x{self.saved_settings.height}"
+        geometry = (f"{scaled_pixels(self.saved_settings.width, self.tk_scaling)}x"
+                    f"{scaled_pixels(self.saved_settings.height, self.tk_scaling)}")
         if self.saved_settings.x is not None and self.saved_settings.y is not None:
             geometry += f"{self.saved_settings.x:+d}{self.saved_settings.y:+d}"
         self.geometry(geometry)
-        self.minsize(850, 520)
+        self.minsize(scaled_pixels(850, self.tk_scaling), scaled_pixels(520, self.tk_scaling))
         # Только главный поток обновляет Tk. Сканирование и склейка помещают
         # результаты в очередь, а stopping завершает их при закрытии окна.
         self.events: queue.SimpleQueue[tuple[str, object]] = queue.SimpleQueue()
@@ -304,8 +309,9 @@ class VideoGlue(VideoListMixin, TkinterDnD.Tk):
             self.after_cancel(self.save_job)
             self.save_job = None
         mapped = bool(self.winfo_ismapped())
-        width = max(850, self.winfo_width()) if mapped else self.saved_settings.width
-        height = max(520, self.winfo_height()) if mapped else self.saved_settings.height
+        # Store logical 96-DPI dimensions to prevent growth after each restart.
+        width = max(850, round(self.winfo_width() / self.ui_scale)) if mapped else self.saved_settings.width
+        height = max(520, round(self.winfo_height() / self.ui_scale)) if mapped else self.saved_settings.height
         self.saved_settings = AppSettings(
             input_dir=str(self.last_input_dir) if self.last_input_dir else "",
             output_dir=str(self.last_output_dir) if self.last_output_dir else "",
@@ -343,6 +349,7 @@ class VideoGlue(VideoListMixin, TkinterDnD.Tk):
         self.resolution_box.configure(state="readonly" if not busy and self.compress_var.get() else "disabled")
         self.gpu_check.configure(state="normal" if not busy and self.compress_var.get() and self.gpu_available else "disabled")
         self.refresh_border_controls()
+        self.schedule_icon_refresh()
 
     def open_output_folder(self, _event: tk.Event | None = None) -> None:
         """Открыть папку выбранного результата в файловом менеджере ОС."""

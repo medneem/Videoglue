@@ -133,9 +133,9 @@ jobs:
       - name: Check source and release tests
         shell: pwsh
         run: |
-          python -m compileall -q main.py ffmpeg.py window.py merge.py version.py scripts test_main.py test_release.py
+          python -m compileall -q main.py dpi.py ffmpeg.py video_list.py window.py merge.py version.py scripts test_main.py test_dpi.py test_release.py
           if ($LASTEXITCODE -ne 0) { throw "Compilation checks failed" }
-          python -m unittest -v test_release
+          python -m unittest -v test_dpi test_release
           if ($LASTEXITCODE -ne 0) { throw "Release unit tests failed" }
 
       - name: Download freshly built FFmpeg and FFprobe
